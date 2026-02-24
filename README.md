@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=Samueras&project=GuidedGenerations-Extension&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 # Guided Generations Extension for SillyTavern
 
 This extension brings the full power of the original "Guided Generations" Quick Reply set to SillyTavern as a native extension. It provides modular, context-aware tools for shaping, refining, and guiding AI responses—ideal for roleplay, story, and character-driven chats. All features are accessible via intuitive buttons and menus integrated into the SillyTavern UI.
