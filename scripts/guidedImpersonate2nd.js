@@ -1,5 +1,5 @@
 // scripts/guidedImpersonate2nd.js
-import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const guidedImpersonate2nd = async () => {
     const textarea = document.getElementById('send_textarea');
@@ -36,8 +36,10 @@ const guidedImpersonate2nd = async () => {
     debugLog(`[Impersonate-2nd] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
     
     // Use user-defined impersonate prompt override
-    const promptTemplate = extension_settings[extensionName]?.promptImpersonate2nd ?? '';
-    const filledPrompt = promptTemplate.replace('{{input}}', currentInputText);
+    const promptTemplate = await getPromptValue('promptImpersonate2nd', '', {
+        settings: extension_settings[extensionName],
+    });
+    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
 
     try {
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

@@ -1,4 +1,4 @@
-import { getContext, extension_settings, extensionName, debugLog, createTrackerNote, requestCompletion, shouldUseDirectCall } from './guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, debugLog, createTrackerNote, requestCompletion, shouldUseDirectCall, getPromptValue } from './guideExports.js'; // Import from central hub
 
 /**
  * Generic runner for Persistent Guides STScript commands.
@@ -37,6 +37,7 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     // Handle previous injection based on action
     let initCmd = '';
     if (previousInjectionAction === 'move') {
+        const movedInjectionPrompt = await getPromptValue('persistentGuides.movedPreviousInjection', '');
         initCmd = `// Read existing injection|
 /listinjects return=object |
 /let injections {{pipe}} |
@@ -44,7 +45,7 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
 /var index=${guideId} x |
 /let y {{pipe}} |
 /var index=value y |
-/inject id=${guideId} position=chat scan=true depth=4 [Relevant Informations for portraying characters {{pipe}}] |`;
+/inject id=${guideId} position=chat scan=true depth=4 ${movedInjectionPrompt} |`;
     } else if (previousInjectionAction === 'flush') {
         initCmd = `/flushinject ${guideId} |`;
     }

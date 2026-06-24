@@ -3,7 +3,7 @@
  */
 
 // Import necessary items from central hub
-import { getContext, extension_settings, extensionName } from './guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, getPromptValue } from './guideExports.js'; // Import from central hub
 import { runGuideScript } from './runGuide.js';
 
 /**
@@ -16,11 +16,13 @@ const stateGuide = async (isAuto = false) => {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
 
     const genAs = 'as=char';
-    const defaultPrompt = `[OOC: Answer me out of Character! Considering the last response, write me a list entailing what state and position of all participating characters, including {{user}}, that are present in the current scene. Don't describe their clothes or how they are dressed. Don't mention People who are no longer relevant to the ongoing scene.] `;
-    const genCommandSuffix = extension_settings[extensionName]?.promptState ?? defaultPrompt;
+    const genCommandSuffix = await getPromptValue('promptState', '', {
+        settings: extension_settings[extensionName],
+    });
 
     const depth = extension_settings[extensionName]?.depthPromptState ?? 1;
-    const finalCommand = `/inject id=state position=chat scan=true depth=${depth} role=${injectionRole} [Relevant Informations for portraying characters {{pipe}}] |`;
+    const injectionPrompt = await getPromptValue('persistentGuides.stateInjection', '');
+    const finalCommand = `/inject id=state position=chat scan=true depth=${depth} role=${injectionRole} ${injectionPrompt} |`;
 
     return await runGuideScript({
         guideId: 'state',

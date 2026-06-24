@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Spellcheck tool.
  */
-import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall } from '../persistentGuides/guideExports.js';
+import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from '../persistentGuides/guideExports.js';
 
 const spellchecker = async () => {
     const textarea = document.getElementById('send_textarea');
@@ -20,8 +20,10 @@ const spellchecker = async () => {
     debugLog(`[Spellchecker] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
     
     // Use user-defined spellchecker prompt override
-    const promptTemplate = extension_settings[extensionName]?.promptSpellchecker ?? '';
-    const filledPrompt = promptTemplate.replace('{{input}}', currentInputText);
+    const promptTemplate = await getPromptValue('promptSpellchecker', '', {
+        settings: extension_settings[extensionName],
+    });
+    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
 
     try {
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

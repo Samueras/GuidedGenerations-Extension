@@ -2,7 +2,7 @@
  * Fun Popup - Handles UI for fun prompts and interactions
  */
 
-import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe } from '../persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, fillPromptTemplate } from '../persistentGuides/guideExports.js'; // Import from central hub
 
 // Map to store fun prompts loaded from file
 let FUN_PROMPTS = {};
@@ -217,7 +217,8 @@ export class FunPopup {
                     }
                 }
 
-                const promptWithInput = `${filledPrompt}In addition, make sure to take the following into consideration: ${currentInput}`;
+                const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
+                const promptWithInput = `${filledPrompt}${fillPromptTemplate(inputSuffixTemplate, { input: currentInput })}`;
                 const responseText = await requestCompletion({
                     profileName: profileValue,
                     presetName: presetValue,
@@ -301,9 +302,11 @@ export class FunPopup {
                         if (shouldUseIndex) {
                             debugLog(`[FunPopup] Using group member index ${selectedIndex} for numeric-prefixed name.`);
                         }
+                        const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
+                        const inputSuffix = fillPromptTemplate(inputSuffixTemplate, { input: '{{input}}' });
                         stscriptCommand = 
 `// Group chat logic for Fun Prompt|
-/inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}In addition, make sure to take the following into consideration: {{input}}]|
+/inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}${inputSuffix}]|
 /trigger await=true ${triggerArg}|
 `;
                     } else {
@@ -313,8 +316,10 @@ export class FunPopup {
                     }
                 } else {
                     // Single character logic
+                    const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
+                    const inputSuffix = fillPromptTemplate(inputSuffixTemplate, { input: '{{input}}' });
                     stscriptCommand = `// Single character logic for Fun Prompt|
-/inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}In addition, make sure to take the following into consideration: {{input}}]|
+/inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}${inputSuffix}]|
 /trigger await=true|
 `;
                 }
@@ -350,7 +355,8 @@ export class FunPopup {
         const textarea = document.getElementById('send_textarea');
         const currentInput = textarea ? textarea.value.trim() : '';
         const filledPrompt = promptText.replace(/\n/g, '\\n'); // Escape newlines for the script
-        const promptWithInput = `${filledPrompt}In addition, make sure to take the following into consideration: ${currentInput}`;
+        const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
+        const promptWithInput = `${filledPrompt}${fillPromptTemplate(inputSuffixTemplate, { input: currentInput })}`;
 
         try {
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

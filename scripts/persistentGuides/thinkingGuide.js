@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Thinking option in the Persistent Guides menu.
  */
-import { getContext, extension_settings } from './guideExports.js'; // Import from central hub
+import { getContext, extension_settings, getPromptValue } from './guideExports.js'; // Import from central hub
 import { runGuideScript } from './runGuide.js';
 
 const extensionName = "GuidedGenerations-Extension";
@@ -14,10 +14,12 @@ const extensionName = "GuidedGenerations-Extension";
 const thinkingGuide = async (isAuto = false) => {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
 
-    let genCommandSuffix = extension_settings[extensionName]?.promptThinking ?? `[OOC: Answer me out of Character! Write what each characters in the current scene are currently thinking, pure thought only. Do NOT continue the story or include narration or dialogue. Do not include the⁣ {{user}}'s thoughts.]`;
-    const injectLabel = `Characters are currently thinking: {{pipe}}`;
+    let genCommandSuffix = await getPromptValue('promptThinking', '', {
+        settings: extension_settings[extensionName],
+    });
+    const injectionPrompt = await getPromptValue('persistentGuides.thinkingInjection', '');
     const depth = extension_settings[extensionName]?.depthPromptThinking ?? 0;
-    const finalCommand = `/inject id=thinking position=chat scan=true depth=${depth} role=${injectionRole} [${injectLabel}] |`;
+    const finalCommand = `/inject id=thinking position=chat scan=true depth=${depth} role=${injectionRole} ${injectionPrompt} |`;
 
     return await runGuideScript({
         guideId: 'thinking',

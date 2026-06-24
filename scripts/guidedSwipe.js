@@ -1,6 +1,6 @@
 // scripts/guidedSwipe.js
 
-import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Helper function for delays
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -180,8 +180,10 @@ const guidedSwipe = async () => {
         setPreviousImpersonateInput(originalInput);
 
         // Use user-defined guided swipe prompt override
-        const promptTemplate = extension_settings[extensionName]?.promptGuidedSwipe ?? '';
-        const filledPrompt = promptTemplate.replace('{{input}}', originalInput);
+        const promptTemplate = await getPromptValue('promptGuidedSwipe', '', {
+            settings: extension_settings[extensionName],
+        });
+        const filledPrompt = fillPromptTemplate(promptTemplate, { input: originalInput });
 
         // --- 1. Store Input & Inject Context (if any) --- (Use direct context method)
         if (originalInput.trim() || (promptTemplate.trim() !== '' && promptTemplate.trim() !== '{{input}}')) {

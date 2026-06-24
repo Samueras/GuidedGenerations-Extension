@@ -8,6 +8,8 @@ import {
     debugLog,
     generateNewSwipe,
     handleSwitching,
+    getPromptValue,
+    fillPromptTemplate,
 } from '../persistentGuides/guideExports.js';
 
 const SCRIPT_PROMPT_KEY = 'script_inject_';
@@ -42,12 +44,6 @@ function getCurrentlyShownMessageIndex(context) {
         return domMessageId;
     }
     return context.chat.length - 1;
-}
-
-function fillPromptTemplate(template, replacements) {
-    return Object.entries(replacements).reduce((result, [key, value]) => {
-        return result.replaceAll(`{{${key}}}`, String(value ?? ''));
-    }, template);
 }
 
 function setTemporaryInjection(context, id, value, { position = INJECT_POSITIONS.chat, depth = 0, scan = true, role = INJECT_ROLES.system } = {}) {
@@ -99,7 +95,7 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
     const presetValue = settings.presetSeparatedThinking ?? '';
     const injectionRole = settings.injectionEndRole ?? 'system';
     const role = INJECT_ROLES[String(injectionRole).toLowerCase()] ?? INJECT_ROLES.system;
-    const promptTemplate = settings.promptSeparatedThinking ?? '';
+    const promptTemplate = await getPromptValue('promptSeparatedThinking', '', { settings });
     const chatHistory = buildChatHistoryBlock(context.chat);
     const promptForModel = fillPromptTemplate(promptTemplate, {
         chat: chatHistory,

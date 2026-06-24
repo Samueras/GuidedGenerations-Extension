@@ -2,6 +2,85 @@
 
 import { extensionName, loadSettings, updateSettingsUI, addSettingsEventListeners, defaultSettings, debugLog, debugWarn, renderExtensionTemplateAsync, debugProfileSystem } from './persistentGuides/guideExports.js'; // Import from central hub
 
+const DEFAULT_PROMPTS_URL = 'https://raw.githubusercontent.com/Samueras/GuidedGenerations-Extension/develop/prompts.json';
+const PROMPT_SETTING_KEYS = [
+    'promptClothes',
+    'promptState',
+    'promptThinking',
+    'promptSituational',
+    'promptRules',
+    'promptCorrections',
+    'promptSeparatedThinking',
+    'promptSpellchecker',
+    'promptImpersonate1st',
+    'promptImpersonate2nd',
+    'promptImpersonate3rd',
+    'promptGuidedResponse',
+    'promptGuidedSwipe',
+    'promptGuidedContinue',
+    'customAutoGuidePrompt',
+];
+
+function getPromptOverrideSettingKey(promptKey) {
+    return `use${promptKey.charAt(0).toUpperCase()}${promptKey.slice(1)}SettingOverride`;
+}
+
+async function downloadDefaultPromptsFile(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    try {
+        const response = await fetch(DEFAULT_PROMPTS_URL, { cache: 'no-cache' });
+        if (!response.ok) {
+            throw new Error(`GitHub returned ${response.status}`);
+        }
+
+        const text = await response.text();
+        JSON.parse(text);
+
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'prompts.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error(`[${extensionName}] Failed to download default prompts.json:`, error);
+        alert(`Could not download default prompts.json: ${error.message || error}`);
+    }
+}
+
+function setupPromptOverrideToggles(container) {
+    for (const promptKey of PROMPT_SETTING_KEYS) {
+        const textarea = container.querySelector(`#gg_${promptKey}`);
+        if (!textarea) continue;
+
+        const overrideKey = getPromptOverrideSettingKey(promptKey);
+        if (container.querySelector(`#gg_${overrideKey}`)) continue;
+
+        const wrapper = document.createElement('label');
+        wrapper.style.display = 'inline-flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '4px';
+        wrapper.style.marginTop = '4px';
+        wrapper.style.marginLeft = '8px';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `gg_${overrideKey}`;
+        checkbox.name = overrideKey;
+        checkbox.className = 'gg-setting-input';
+
+        wrapper.appendChild(checkbox);
+        wrapper.append('Use settings override');
+
+        textarea.insertAdjacentElement('afterend', wrapper);
+    }
+}
+
 /**
  * Loads and renders the settings HTML for the extension.
  */
@@ -35,6 +114,7 @@ export async function loadSettingsPanel() {
 
             setTimeout(async () => {
                 loadSettings();
+                setupPromptOverrideToggles(container);
                 updateSettingsUI();
                 addSettingsEventListeners();
 
@@ -92,6 +172,11 @@ export async function loadSettingsPanel() {
                         }
                     });
                 });
+
+                const downloadDefaultPromptsButton = container.querySelector('#ggDownloadDefaultPrompts');
+                if (downloadDefaultPromptsButton) {
+                    downloadDefaultPromptsButton.addEventListener('click', downloadDefaultPromptsFile);
+                }
 
                 // Setup debug profile system button
                 const debugButton = container.querySelector('#debugProfileSystem');

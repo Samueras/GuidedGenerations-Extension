@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Guided Response button.
  */
-import { getContext, extension_settings, isGroupChat, setPreviousImpersonateInput, getPreviousImpersonateInput, debugLog } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, isGroupChat, setPreviousImpersonateInput, getPreviousImpersonateInput, debugLog, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Import the guide scripts for direct execution
 import thinkingGuide from './persistentGuides/thinkingGuide.js'; // Correct relative path
@@ -28,8 +28,10 @@ const guidedResponse = async () => {
     let stscriptCommand;
 
     // Use user-defined guided response prompt override
-    const promptTemplate = extension_settings[extensionName]?.promptGuidedResponse ?? '';
-    const filledPrompt = promptTemplate.replace('{{input}}', originalInput);
+    const promptTemplate = await getPromptValue('promptGuidedResponse', '', {
+        settings: extension_settings[extensionName],
+    });
+    const filledPrompt = fillPromptTemplate(promptTemplate, { input: originalInput });
     const depth = extension_settings[extensionName]?.depthPromptGuidedResponse ?? 0;
 
     let groupCharacterNames = [];

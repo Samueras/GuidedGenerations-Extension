@@ -9,7 +9,9 @@ import {
     requestCompletion,
     shouldUseDirectCall,
     getProfileApiType,
-    extractApiIdFromApiType
+    extractApiIdFromApiType,
+    getPromptValue,
+    fillPromptTemplate
 } from '../persistentGuides/guideExports.js';
 
 let lastCorrectionInstruction = '';
@@ -387,8 +389,10 @@ class CorrectionsPopup {
         const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
         const targetPreset = extension_settings[extensionName]?.[presetKey] ?? '';
 
-        const promptTemplate = extension_settings[extensionName]?.promptCorrections ?? '';
-        const filledPrompt = promptTemplate.replace('{{input}}', instruction);
+        const promptTemplate = await getPromptValue('promptCorrections', '', {
+            settings: extension_settings[extensionName],
+        });
+        const filledPrompt = fillPromptTemplate(promptTemplate, { input: instruction });
 
         const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
         const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
@@ -404,9 +408,15 @@ class CorrectionsPopup {
             ? buildChatHistoryBlock(context.chat || [])
             : '';
 
-        const promptForModel = hasSelection
-            ? `${filledPrompt}${historyBlock ? `\n\nChat history:\n${historyBlock}` : ''}\n\nFull message:\n${baseMessage}\n\nSelected text to rewrite (exact):\n${selectedText}\n\nTask: Rewrite ONLY the selected text to satisfy the instructions.\nReturn ONLY the rewritten selected text with no labels, no quotes, no code fences, and no extra commentary. The output must be ready to replace the selected text verbatim.`
-            : `${filledPrompt}${historyBlock ? `\n\nChat history:\n${historyBlock}` : ''}\n\nFull message to rewrite:\n${baseMessage}\n\nTask: Rewrite the full message to satisfy the instructions.\nReturn ONLY the rewritten full message with no labels, no quotes, no code fences, and no extra commentary.`;
+        const taskTemplate = hasSelection
+            ? await getPromptValue('corrections.selectedTextTask', '')
+            : await getPromptValue('corrections.fullMessageTask', '');
+        const promptForModel = fillPromptTemplate(taskTemplate, {
+            instruction: filledPrompt,
+            historyBlock: historyBlock ? `\n\nChat history:\n${historyBlock}` : '',
+            baseMessage,
+            selectedText,
+        });
 
         debugLog(`[GuidedGenerations][Corrections] Using profile: ${profileValue || 'current'}, preset: ${targetPreset || 'none'}`);
 

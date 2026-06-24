@@ -187,8 +187,11 @@
                     </small>
                 </div>
                 <hr>
-                <h4>Preset Usage</h4>
-                                <small class="setting_item_description">Assign specific System Prompts (Presets) to different Guided Generation actions. When a preset is selected, it will be temporarily activated just before the guide runs, then deactivated. Use the 'GGSystemPrompt' button to quickly fill the field with the default guidance preset.</small>
+                <details class="gg-collapsible-section">
+                    <summary>
+                        <h4>Preset Usage</h4>
+                        <small class="setting_item_description">Assign specific System Prompts (Presets) to different Guided Generation actions. When a preset is selected, it will be temporarily activated just before the guide runs, then deactivated. Use the 'GGSystemPrompt' button to quickly fill the field with the default guidance preset.</small>
+                    </summary>
                 
                 <!-- Profile System Controls -->
                 <div class="setting_item" style="margin-bottom: 20px;">
@@ -508,10 +511,14 @@
                         </div>
                     </div>
                 </div>
+                </details>
                 <hr>
-                <div class="guide-prompt-overrides-section"> <!-- Added wrapper -->
-                    <h4>Guide Prompt Overrides</h4>
-                    <small class="setting_item_description">Customize the instructions sent to the AI for specific guides. Use `&#123;&#123;input&#125;&#125;` where you want the original user text to be inserted (if applicable). Use the 'Default' button to restore the original prompt. Check 'Raw' to send the prompt directly as an STScript command instead of injecting it (advanced use).</small>
+                <details class="guide-prompt-overrides-section gg-collapsible-section"> <!-- Added wrapper -->
+                    <summary>
+                        <h4>Guide Prompt Overrides</h4>
+                        <small class="setting_item_description">By default prompts are loaded from <code>prompts.json</code> in the extension folder. Enable "Use settings override" on a prompt to use the value saved here instead of the file; editing a prompt here enables that toggle automatically. Changes made here are saved in SillyTavern user settings and do not rewrite <code>prompts.json</code>. Use <code>&#123;&#123;input&#125;&#125;</code> where you want the original user text to be inserted (if applicable). Raw and Depth controls are still saved here.</small>
+                        <button type="button" id="ggDownloadDefaultPrompts" class="menu_button" style="margin-top: 8px;">Download default prompts.json from GitHub</button>
+                    </summary>
                     <!-- Textareas for overriding default guide prompts -->
                     <div class="setting_item">
                         <label for="gg_promptClothes" style="margin-left: 8px; min-width:150px; display:block;">Clothes Guide Prompt</label>
@@ -644,7 +651,7 @@
                             <label for="gg_depthPromptGuidedSwipe" style="margin-left:8px;">Depth:</label>
                             <input type="number" id="gg_depthPromptGuidedSwipe" name="depthPromptGuidedSwipe" class="gg-setting-input" min="0" style="width: 50px; margin-left:4px;">
                     </div>
-                </div> <!-- Added closing wrapper tag -->
+                </details> <!-- Added closing wrapper tag -->
             </div>
         </div>
     </div>

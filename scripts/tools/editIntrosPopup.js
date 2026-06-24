@@ -2,34 +2,6 @@
  * Edit Intros Popup - Handles UI for editing character intros with various formatting options
  */
 
-// Map of options to their corresponding stscript prompts
-const EDIT_INTROS_OPTIONS = {
-    // Perspective options
-    'first-person-standard': 'Rewrite the intro in first person, where {{user}} is the narrator using I/me. Keep {{char}}\'s references consistent.',
-    'first-person-by-name': 'Rewrite the intro in first person, but refer to {{user}} by their name instead of I/me, as if the narrator refers to themselves in the third person.',
-    'first-person-as-you': 'Rewrite the intro in first person, but refer to {{user}} as \'you\', creating a self-addressing perspective.',
-    'first-person-he-him': 'Rewrite the intro in first person, but refer to {{user}} using he/him pronouns, as if the narrator speaks about themselves in the third person masculine.',
-    'first-person-she-her': 'Rewrite the intro in first person, but refer to {{user}} using she/her pronouns, as if the narrator speaks about themselves in the third person feminine.',
-    'first-person-they-them': 'Rewrite the intro in first person, but refer to {{user}} using they/them pronouns, as if the narrator speaks about themselves in the third person neutral.',
-    'second-person-as-you': 'Rewrite the intro in second person, addressing {{user}} directly as \'you\', and referring to {{char}} accordingly.',
-    'third-person-by-name': 'Rewrite the intro in third person, referring to {{user}} by name and appropriate pronouns, and {{char}} by their pronouns, describing surroundings as if viewed from an outside observer.',
-    
-    // Tense options
-    'past-tense': 'Rewrite the intro entirely in the past tense, as if these events had already occurred.',
-    'present-tense': 'Rewrite the intro in present tense, making it feel immediate and ongoing.',
-    
-    // Style options
-    'novella-style': 'Change in a novella style format: use full paragraphs, proper punctuation for dialogue, and a consistent narrative voice, as if taken from a published novel, but keep it close to the original text. This is only a style change, Do not invent new paragraphs or sentences. Don\'t use * for narration and Don\'t add anything other to the text. Keep all links and images included and unchanged.',
-    'internet-rp-style': 'Change the intro in internet RP style: use asterisks for actions and narration like *She walks towards {{char}}*, keep all dialogue as is with quotes.',
-    'literary-style': 'Rewrite the intro in a literary style: employ rich metaphors, intricate descriptions, and a more poetic narrative flow, while maintaining proper punctuation and formatting.',
-    'script-style': 'Rewrite the intro in a script style: minimal narration, character names followed by dialogue lines, and brief scene directions in parentheses.',
-    
-    // Gender options
-    'he-him': 'Rewrite the intro changing all references to {{user}} to use he/him pronouns.',
-    'she-her': 'Rewrite the intro changing all references to {{user}} to use she/her pronouns.',
-    'they-them': 'Rewrite the intro changing all references to {{user}} to use they/them pronouns.'
-};
-
 import {
     extensionName,
     getContext,
@@ -40,6 +12,9 @@ import {
     generateNewSwipe,
     activateSendButtons,
     setSendButtonState,
+    getPromptObject,
+    getPromptValue,
+    fillPromptTemplate,
 } from '../persistentGuides/guideExports.js'; // Import from central hub
 
 // Class to handle the popup functionality
@@ -270,7 +245,8 @@ export class EditIntrosPopup {
         });
     }
 
-    getSelectedInstructions() {
+    async getSelectedInstructions() {
+        const optionPrompts = await getPromptObject('editIntros.options', {});
         const selectedKeys = Object.values(this.selectedOptions).flatMap(value => {
             if (Array.isArray(value)) {
                 return value;
@@ -279,7 +255,7 @@ export class EditIntrosPopup {
         });
 
         return selectedKeys
-            .map(key => EDIT_INTROS_OPTIONS[key])
+            .map(key => optionPrompts[key])
             .filter(Boolean);
     }
 
@@ -361,7 +337,7 @@ export class EditIntrosPopup {
         let instruction = '';
         const customCommandTextarea = this.popupElement.querySelector('#gg-custom-edit-command');
         const customCommand = customCommandTextarea.value.trim();
-        const selectedInstructions = this.getSelectedInstructions();
+        const selectedInstructions = await this.getSelectedInstructions();
 
         // --- Build Instruction ---
         if (this.isCustomSelected && customCommand) {
@@ -394,7 +370,11 @@ export class EditIntrosPopup {
             }
 
             const messageToRewrite = context.chat[0]?.mes || '';
-            const promptForModel = `Revise the existing greeting using ONLY the requested adjustments below.\n\nRequested adjustments:\n${instruction}\n\nOriginal greeting:\n${messageToRewrite}\n\nRules:\n- Keep the greeting content, structure, formatting, links, and length as close as possible unless a requested adjustment requires a specific change.\n- Do NOT add new story events, new actions, or extra continuation text.\n- Do NOT expand the greeting.\n- Return ONLY the revised greeting text.`;
+            const promptTemplate = await getPromptValue('editIntros.editExisting', '');
+            const promptForModel = fillPromptTemplate(promptTemplate, {
+                instruction,
+                messageToRewrite,
+            });
 
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
             let updatedIntro = '';
@@ -438,7 +418,7 @@ export class EditIntrosPopup {
         let instruction = '';
         const customCommandTextarea = this.popupElement.querySelector('#gg-custom-edit-command');
         const customCommand = customCommandTextarea.value.trim();
-        const selectedInstructions = this.getSelectedInstructions();
+        const selectedInstructions = await this.getSelectedInstructions();
 
         // --- Build Instruction (Same logic as applyChanges) ---
         if (this.isCustomSelected && customCommand) {
@@ -467,7 +447,8 @@ export class EditIntrosPopup {
                 return;
             }
 
-            const promptForModel = `Write a single greeting based on the following requirements:\n${instruction}\n\nRules:\n- Output ONLY the greeting text.\n- Do NOT continue beyond the greeting.\n- Do NOT add extra sections, explanations, or commentary.`;
+            const promptTemplate = await getPromptValue('editIntros.makeNew', '');
+            const promptForModel = fillPromptTemplate(promptTemplate, { instruction });
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
             let newIntro = '';
             if (useDirectCall) {

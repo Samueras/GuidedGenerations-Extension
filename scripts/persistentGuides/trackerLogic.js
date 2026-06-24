@@ -3,7 +3,7 @@
  * @description Handles the automatic execution of trackers based on chat metadata configuration.
  */
 
-import { getContext, extensionName, debugLog, requestCompletion, shouldUseDirectCall } from './guideExports.js'; // Import from central hub
+import { getContext, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './guideExports.js'; // Import from central hub
 
 /**
  * Executes the tracker logic automatically when triggered
@@ -159,7 +159,9 @@ export async function executeTracker(isAuto = false, force = false) {
 
         // Step 3: Update the tracker injection
         if (trackerUpdate && trackerUpdate.trim()) {
-            const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system [Tracker Information ${trackerUpdate}]`;
+            const injectionTemplate = await getPromptValue('tracker.trackerInjection', '');
+            const injectionPrompt = fillPromptTemplate(injectionTemplate, { tracker: trackerUpdate });
+            const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system ${injectionPrompt}`;
             await context.executeSlashCommandsWithOptions(injectionCommand, { 
                 showOutput: false, 
                 handleExecutionErrors: true 

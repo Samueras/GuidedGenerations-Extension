@@ -20,7 +20,7 @@ import { getContext, loadExtensionSettings, extension_settings, renderExtensionT
 import { getPresetManager } from '../../../../scripts/preset-manager.js';
 import { loadSettingsPanel } from './scripts/settingsPanel.js';
 import { showVersionNotification } from './scripts/ui/versionNotificationPopup.js';
-import { getProfileList } from './scripts/persistentGuides/guideExports.js';
+import { getProfileList, getPromptValue } from './scripts/persistentGuides/guideExports.js';
 
 // Import auto-triggerable guides
 import thinkingGuide from './scripts/persistentGuides/thinkingGuide.js';
@@ -294,6 +294,33 @@ export const defaultSettings = {
     LastPatchNoteVersion: '1.4.3' // Default extension version for patch notes
 };
 
+const PROMPT_SETTING_KEYS = [
+    'promptClothes',
+    'promptState',
+    'promptThinking',
+    'promptSituational',
+    'promptRules',
+    'promptCorrections',
+    'promptSeparatedThinking',
+    'promptSpellchecker',
+    'promptImpersonate1st',
+    'promptImpersonate2nd',
+    'promptImpersonate3rd',
+    'promptGuidedResponse',
+    'promptGuidedSwipe',
+    'promptGuidedContinue',
+    'customAutoGuidePrompt',
+];
+
+function getPromptOverrideSettingKey(promptKey) {
+    return `use${promptKey.charAt(0).toUpperCase()}${promptKey.slice(1)}SettingOverride`;
+}
+
+const PROMPT_OVERRIDE_SETTING_KEYS = PROMPT_SETTING_KEYS.map(getPromptOverrideSettingKey);
+for (const key of PROMPT_OVERRIDE_SETTING_KEYS) {
+    defaultSettings[key] = false;
+}
+
 /**
  * Checks if the current chat context is a group chat.
  * @returns {boolean} True if it is a group chat, false otherwise.
@@ -329,6 +356,7 @@ async function loadSettings() {
 
     // Handle backward compatibility for profile settings
     migrateProfileSettings();
+    migratePromptSettings();
     
     // Debug logging for presetFun specifically
     debugLog(`presetFun setting value:`, extension_settings[extensionName].presetFun);
@@ -367,6 +395,18 @@ function migrateProfileSettings() {
             debugLog(`[${extensionName}] Migrated ${profileKey} to empty (current profile) for backward compatibility`);
         }
     });
+}
+
+function migratePromptSettings() {
+    const settings = extension_settings[extensionName];
+    if (!settings) return;
+
+    for (const key of PROMPT_SETTING_KEYS) {
+        const overrideSettingKey = getPromptOverrideSettingKey(key);
+        if (!settings[overrideSettingKey] && settings[key] === defaultSettings[key]) {
+            delete settings[key];
+        }
+    }
 }
 
 async function updateSettingsUI() {
@@ -473,12 +513,14 @@ async function updateSettingsUI() {
         });
 
         // Populate guide prompt override textareas
-        ['promptClothes','promptState','promptThinking','promptSituational','promptRules','promptCorrections','promptSeparatedThinking','promptSpellchecker','promptImpersonate1st','promptImpersonate2nd','promptImpersonate3rd','promptGuidedResponse','promptGuidedSwipe','promptGuidedContinue','customAutoGuidePrompt'].forEach(key => {
+        for (const key of ['promptClothes','promptState','promptThinking','promptSituational','promptRules','promptCorrections','promptSeparatedThinking','promptSpellchecker','promptImpersonate1st','promptImpersonate2nd','promptImpersonate3rd','promptGuidedResponse','promptGuidedSwipe','promptGuidedContinue','customAutoGuidePrompt']) {
             const textarea = document.getElementById(`gg_${key}`);
             if (textarea) {
-                textarea.value = extension_settings[extensionName][key] ?? defaultSettings[key] ?? '';
+                textarea.value = await getPromptValue(key, defaultSettings[key] ?? '', {
+                    settings: extension_settings[extensionName],
+                });
             }
-        });
+        }
 
         // Populate depth number input fields
         ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe'].forEach(key => {
@@ -629,6 +671,17 @@ function handleSettingChange(event) {
 
     if (extension_settings[extensionName]) {
         extension_settings[extensionName][settingName] = settingValue;
+        if (target.tagName === 'TEXTAREA' && PROMPT_SETTING_KEYS.includes(settingName)) {
+            const overrideSettingName = getPromptOverrideSettingKey(settingName);
+            extension_settings[extensionName][overrideSettingName] = true;
+            const overrideCheckbox = document.querySelector(`input[name="${overrideSettingName}"]`);
+            if (overrideCheckbox) {
+                overrideCheckbox.checked = true;
+            }
+        }
+        if (PROMPT_OVERRIDE_SETTING_KEYS.includes(settingName)) {
+            setTimeout(() => updateSettingsUI(), 0);
+        }
         debugLog(`> Updated setting: Key='${settingName}', New Value='${settingValue}'`);
         debugLog(`> Current extension_settings[${extensionName}]:`, JSON.stringify(extension_settings[extensionName]));
         saveSettingsDebounced(); // Save after updating the specific key
