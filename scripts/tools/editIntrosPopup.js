@@ -19,7 +19,7 @@ const EDIT_INTROS_OPTIONS = {
     'present-tense': 'Rewrite the intro in present tense, making it feel immediate and ongoing.',
     
     // Style options
-    'novella-style': 'Change in a novella style format: use full paragraphs, proper punctuation for dialogue, and a consistent narrative voice, as if taken from a published novel. Don\'t use * for narration and Don\'t add anything other to the text. Keep all links to images intakt.',
+    'novella-style': 'Change in a novella style format: use full paragraphs, proper punctuation for dialogue, and a consistent narrative voice, as if taken from a published novel, but keep it close to the original text. This is only a style change, Do not invent new paragraphs or sentences. Don\'t use * for narration and Don\'t add anything other to the text. Keep all links and images included and unchanged.',
     'internet-rp-style': 'Change the intro in internet RP style: use asterisks for actions and narration like *She walks towards {{char}}*, keep all dialogue as is with quotes.',
     'literary-style': 'Rewrite the intro in a literary style: employ rich metaphors, intricate descriptions, and a more poetic narrative flow, while maintaining proper punctuation and formatting.',
     'script-style': 'Rewrite the intro in a script style: minimal narration, character names followed by dialogue lines, and brief scene directions in parentheses.',
@@ -30,17 +30,27 @@ const EDIT_INTROS_OPTIONS = {
     'they-them': 'Rewrite the intro changing all references to {{user}} to use they/them pronouns.'
 };
 
-import { extensionName, getContext, extension_settings, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe } from '../persistentGuides/guideExports.js'; // Import from central hub
+import {
+    extensionName,
+    getContext,
+    extension_settings,
+    debugLog,
+    requestCompletion,
+    shouldUseDirectCall,
+    generateNewSwipe,
+    activateSendButtons,
+    setSendButtonState,
+} from '../persistentGuides/guideExports.js'; // Import from central hub
 
 // Class to handle the popup functionality
 export class EditIntrosPopup {
     constructor() {
         // Initialize state for multiple selections
         this.selectedOptions = { 
-            perspective: null, 
-            tense: null, 
-            style: null, 
-            gender: null 
+            perspective: [], 
+            tense: [], 
+            style: [], 
+            gender: [] 
         };
         this.isCustomSelected = false; // Track if custom option is active
         this.popupElement = null;
@@ -198,21 +208,32 @@ export class EditIntrosPopup {
         const handleCategorySelection = (element) => {
             const category = element.dataset.category;
             const value = element.dataset.value || element.dataset.option; // Use data-value for suboptions, data-option for options
-            
-            // Deselect other options *within the same category*
-            this.popupElement.querySelectorAll(`[data-category="${category}"]`).forEach(el => {
-                el.classList.remove('selected');
-            });
 
-            // Select the clicked option
-            element.classList.add('selected');
-            // If it's a suboption, also mark its parent option visually (optional, for clarity)
+            const selected = element.classList.toggle('selected');
+            const selectedValues = Array.isArray(this.selectedOptions[category])
+                ? [...this.selectedOptions[category]]
+                : this.selectedOptions[category]
+                    ? [this.selectedOptions[category]]
+                    : [];
+
             if (element.classList.contains('gg-suboption')) {
-                 element.closest('.gg-option')?.classList.add('selected');
+                const parentOption = element.closest('.gg-option');
+                const hasSelectedSuboption = !!parentOption?.querySelector('.gg-suboption.selected');
+                parentOption?.classList.toggle('selected', hasSelectedSuboption);
             }
 
-            // Update state
-            this.selectedOptions[category] = value;
+            if (selected) {
+                if (!selectedValues.includes(value)) {
+                    selectedValues.push(value);
+                }
+            } else {
+                const existingIndex = selectedValues.indexOf(value);
+                if (existingIndex !== -1) {
+                    selectedValues.splice(existingIndex, 1);
+                }
+            }
+
+            this.selectedOptions[category] = selectedValues;
         };
 
         options.forEach(option => {
@@ -249,26 +270,39 @@ export class EditIntrosPopup {
         });
     }
 
+    getSelectedInstructions() {
+        const selectedKeys = Object.values(this.selectedOptions).flatMap(value => {
+            if (Array.isArray(value)) {
+                return value;
+            }
+            return value ? [value] : [];
+        });
+
+        return selectedKeys
+            .map(key => EDIT_INTROS_OPTIONS[key])
+            .filter(Boolean);
+    }
+
     deselectAllPresets() {
         this.popupElement.querySelectorAll('.gg-option:not(.gg-custom-option), .gg-suboption').forEach(el => {
             el.classList.remove('selected');
         });
         this.popupElement.querySelector('.gg-custom-option')?.classList.remove('selected');
         Object.keys(this.selectedOptions).forEach(key => {
-            this.selectedOptions[key] = null;
+            this.selectedOptions[key] = [];
         });
         this.isCustomSelected = false;
     }
 
     restoreSelectionState() {
         const customOption = this.popupElement.querySelector('.gg-custom-option');
-        Object.keys(this.selectedOptions).forEach(key => {
-            const selectedElement = this.popupElement.querySelector(`[data-option="${key}"], [data-value="${this.selectedOptions[key]}"]`);
-            if (selectedElement) {
-                selectedElement.classList.add('selected');
-            }
+        Object.values(this.selectedOptions).flatMap(value => Array.isArray(value) ? value : [value]).forEach(selectedKey => {
+            if (!selectedKey) return;
+            const selectedElement = this.popupElement.querySelector(`[data-option="${selectedKey}"], [data-value="${selectedKey}"]`);
+            selectedElement?.classList.add('selected');
+            selectedElement?.closest('.gg-option')?.classList.add('selected');
         });
-        customOption.classList.toggle('selected', this.isCustomSelected);
+        customOption?.classList.toggle('selected', this.isCustomSelected);
     }
 
     /**
@@ -279,7 +313,7 @@ export class EditIntrosPopup {
         // Reset state variables
         this.isCustomSelected = false;
         Object.keys(this.selectedOptions).forEach(key => {
-            this.selectedOptions[key] = null;
+            this.selectedOptions[key] = [];
         });
 
         // Reset visual state
@@ -327,15 +361,7 @@ export class EditIntrosPopup {
         let instruction = '';
         const customCommandTextarea = this.popupElement.querySelector('#gg-custom-edit-command');
         const customCommand = customCommandTextarea.value.trim();
-        const selectedInstructions = [];
-
-        // Combine instructions from selected categories
-        Object.keys(this.selectedOptions).forEach(category => {
-            const selectedKey = this.selectedOptions[category];
-            if (selectedKey && EDIT_INTROS_OPTIONS[selectedKey]) {
-                selectedInstructions.push(EDIT_INTROS_OPTIONS[selectedKey]);
-            }
-        });
+        const selectedInstructions = this.getSelectedInstructions();
 
         // --- Build Instruction ---
         if (this.isCustomSelected && customCommand) {
@@ -412,15 +438,7 @@ export class EditIntrosPopup {
         let instruction = '';
         const customCommandTextarea = this.popupElement.querySelector('#gg-custom-edit-command');
         const customCommand = customCommandTextarea.value.trim();
-        const selectedInstructions = [];
-
-        // Combine instructions from selected categories
-        Object.keys(this.selectedOptions).forEach(category => {
-            const selectedKey = this.selectedOptions[category];
-            if (selectedKey && EDIT_INTROS_OPTIONS[selectedKey]) {
-                selectedInstructions.push(EDIT_INTROS_OPTIONS[selectedKey]);
-            }
-        });
+        const selectedInstructions = this.getSelectedInstructions();
 
         // --- Build Instruction (Same logic as applyChanges) ---
         if (this.isCustomSelected && customCommand) {
@@ -555,10 +573,45 @@ async function applyIntroUpdate(context, introText) {
 const editIntrosPopup = new EditIntrosPopup();
 export default editIntrosPopup;
 
+const SCRIPT_PROMPT_KEY = 'script_inject_';
+const INJECT_POSITIONS = {
+    chat: 1,
+};
+const INJECT_ROLES = {
+    system: 0,
+    user: 1,
+    assistant: 2,
+};
+
+function setTemporaryInjection(context, id, value, { position = INJECT_POSITIONS.chat, depth = 0, scan = true, role = INJECT_ROLES.system } = {}) {
+    if (!context.chatMetadata.script_injects) {
+        context.chatMetadata.script_injects = {};
+    }
+
+    context.chatMetadata.script_injects[id] = { value, position, depth, scan, role, filter: null };
+    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${id}`, value, position, depth, scan, role);
+    context.saveMetadataDebounced?.();
+}
+
+function flushTemporaryInjection(context, id) {
+    const existingInject = context.chatMetadata?.script_injects?.[id];
+    const position = existingInject?.position ?? INJECT_POSITIONS.chat;
+    const depth = existingInject?.depth ?? 0;
+    const scan = existingInject?.scan ?? true;
+    const role = existingInject?.role ?? INJECT_ROLES.system;
+
+    if (context.chatMetadata?.script_injects) {
+        delete context.chatMetadata.script_injects[id];
+    }
+
+    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${id}`, '', position, depth, scan, role);
+    context.saveMetadataDebounced?.();
+}
+
 async function executeSwipeGenerationWithPrompt(context, promptText) {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
-    const filledPrompt = String(promptText || '').replace(/\n/g, '\\n');
-    const injectCommand = `/inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt} |`;
+    const role = INJECT_ROLES[String(injectionRole).toLowerCase()] ?? INJECT_ROLES.system;
+    const filledPrompt = String(promptText || '');
     const tempMessage = {
         name: 'Editing Greeting',
         is_user: false,
@@ -590,10 +643,7 @@ async function executeSwipeGenerationWithPrompt(context, promptText) {
             handleExecutionErrors: true,
         });
 
-        await context.executeSlashCommandsWithOptions(injectCommand, {
-            showOutput: false,
-            handleExecutionErrors: true,
-        });
+        setTemporaryInjection(context, 'instruct', filledPrompt, { role });
 
         const swipeSuccess = await generateNewSwipe();
         if (!swipeSuccess) {
@@ -601,10 +651,7 @@ async function executeSwipeGenerationWithPrompt(context, promptText) {
         }
         return true;
     } finally {
-        await context.executeSlashCommandsWithOptions('/flushinject instruct', {
-            showOutput: false,
-            handleExecutionErrors: true,
-        });
+        flushTemporaryInjection(context, 'instruct');
 
         if (tempInserted) {
             if (context.chat[0] === tempMessage) {
@@ -620,6 +667,14 @@ async function executeSwipeGenerationWithPrompt(context, promptText) {
             }
             if (typeof context.reloadCurrentChat === 'function') {
                 await context.reloadCurrentChat();
+            }
+            // reloadCurrentChat rebuilds UI; generation may have left send/stop controls hidden — resync explicitly
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            try {
+                activateSendButtons?.();
+                setSendButtonState?.(false);
+            } catch (_) {
+                /* ignore if SillyTavern API differs */
             }
             debugLog('[EditIntros] Removed temporary "Editing Greeting" message after swipe generation.');
         }
