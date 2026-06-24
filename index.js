@@ -1643,7 +1643,29 @@ async function installPreset() {
 let updatePersistentGuideCounterDebounced;
 let shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
 let separatedThinkingAutoTriggerRunning = false;
+let lastAssistantMessageRenderedAt = 0;
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const SEPARATED_THINKING_AUTO_RENDER_TIMEOUT_MS = 5000;
+const SEPARATED_THINKING_AUTO_SETTLE_MS = 2500;
+
+function waitForAssistantMessageRenderedAfter(eventStartedAt, context) {
+    if (lastAssistantMessageRenderedAt >= eventStartedAt) {
+        return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve();
+        };
+        const timeoutId = setTimeout(finish, SEPARATED_THINKING_AUTO_RENDER_TIMEOUT_MS);
+        context.eventSource.once(context.eventTypes.CHARACTER_MESSAGE_RENDERED, finish);
+    });
+}
 
 // Run setup after page load
 $(document).ready(async function () {
@@ -1707,6 +1729,10 @@ $(document).ready(async function () {
         }
     }
     console.log(`${extensionName}: Finished registering SillyTavern event listeners for counter.`);
+
+    eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, () => {
+        lastAssistantMessageRenderedAt = Date.now();
+    });
 
     // Settings Panel Setup (runs with delay to allow main UI to render)
     setTimeout(() => {
@@ -1921,10 +1947,21 @@ $(document).ready(async function () {
         separatedThinkingAutoTriggerRunning = true;
         try {
             debugLog('[SeparatedThinking][Auto] Running after generation ended.');
-            // Let SillyTavern finish saving/rendering the just-generated message before swiping it.
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // GENERATION_ENDED can fire before rendering, swipe normalization, and streaming cleanup finish.
+            const generationEndedAt = Date.now();
             const context = getContext();
-            const lastMessage = context?.chat?.[context.chat.length - 1];
+            await waitForAssistantMessageRenderedAfter(generationEndedAt, context);
+            await delay(SEPARATED_THINKING_AUTO_SETTLE_MS);
+            if (!settings?.autoTriggerSeparatedThinking) {
+                debugLog('[SeparatedThinking][Auto] Auto-trigger disabled while waiting; skipping.');
+                return;
+            }
+            if (!separatedThinkingAutoTriggerRunning) {
+                debugLog('[SeparatedThinking][Auto] Auto-trigger state cleared while waiting; skipping.');
+                return;
+            }
+            const refreshedContext = getContext();
+            const lastMessage = refreshedContext?.chat?.[refreshedContext.chat.length - 1];
             if (!lastMessage || lastMessage.is_user || lastMessage.is_system) {
                 debugLog('[SeparatedThinking][Auto] Last message is not an assistant message; skipping.');
                 return;
