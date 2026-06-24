@@ -938,8 +938,7 @@ function updateExtensionButtons() {
         separatedThinkingMenuItem.title = "Analyzes the currently shown message for logical, situational, and behavioural errors, then appends a corrected swipe.";
         separatedThinkingMenuItem.addEventListener('click', async (event) => {
             try {
-                const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
-                await separatedThinking();
+                await runSeparatedThinkingGuarded();
                 ggToolsMenu.classList.remove('shown');
                 event.stopPropagation();
             } catch (error) {
@@ -1299,8 +1298,7 @@ function updateExtensionButtons() {
     if (settings.showSeparatedThinkingButton) {
         const separatedThinkingButton = createActionButton('gg_separated_thinking_button', 'Separated Thinking', 'fa-solid fa-brain', async () => {
             try {
-                const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
-                await separatedThinking();
+                await runSeparatedThinkingGuarded();
             } catch (error) {
                 console.error('[GuidedGenerations] Action button: Failed to import or execute Separated Thinking:', error);
             }
@@ -1644,6 +1642,18 @@ let updatePersistentGuideCounterDebounced;
 let shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
 let separatedThinkingAutoTriggerRunning = false;
 let lastAssistantMessageRenderedAt = 0;
+
+// Runs Separated Thinking while holding the auto-trigger guard so that the
+// swipe it generates does not arm (and then fire) the auto-trigger recursively.
+async function runSeparatedThinkingGuarded(options = {}) {
+    separatedThinkingAutoTriggerRunning = true;
+    try {
+        const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
+        await separatedThinking(options);
+    } finally {
+        separatedThinkingAutoTriggerRunning = false;
+    }
+}
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const SEPARATED_THINKING_AUTO_RENDER_TIMEOUT_MS = 5000;
