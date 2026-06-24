@@ -1730,7 +1730,11 @@ $(document).ready(async function () {
             stackTrace: new Error().stack
         });
 
-        shouldAutoTriggerSeparatedThinkingAfterGeneration = (type === 'normal' || typeof type === 'undefined') && !dryRun && !generateArgsObject?.signal;
+        const shouldArmSeparatedThinkingAutoTrigger = (type === 'normal' || type === 'swipe' || typeof type === 'undefined') &&
+            !dryRun &&
+            !generateArgsObject?.signal &&
+            !separatedThinkingAutoTriggerRunning;
+        shouldAutoTriggerSeparatedThinkingAfterGeneration = shouldArmSeparatedThinkingAutoTrigger;
 
         // Condition for auto-triggering guides
         if ((type === 'normal' || typeof type === 'undefined') && !dryRun && !generateArgsObject?.signal) {
@@ -1863,7 +1867,7 @@ $(document).ready(async function () {
         shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
         separatedThinkingAutoTriggerRunning = true;
         try {
-            debugLog('[SeparatedThinking][Auto] Running after normal generation ended.');
+            debugLog('[SeparatedThinking][Auto] Running after generation ended.');
             // Let SillyTavern finish saving/rendering the just-generated message before swiping it.
             await new Promise(resolve => setTimeout(resolve, 500));
             const context = getContext();
