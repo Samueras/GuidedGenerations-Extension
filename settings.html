@@ -72,6 +72,12 @@
                 </div>
                 <div class="setting_item">
                     <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                        <input type="checkbox" id="gg_showSeparatedThinkingButton" name="showSeparatedThinkingButton" class="gg-setting-input">
+                        <label for="gg_showSeparatedThinkingButton" style="margin-left: 8px;">Show Separated Thinking Button</label>
+                    </div>
+                </div>
+                <div class="setting_item">
+                    <div style="display: flex; align-items: center; margin-bottom: 5px;">
                         <input type="checkbox" id="gg_showSpellcheckerButton" name="showSpellcheckerButton" class="gg-setting-input">
                         <label for="gg_showSpellcheckerButton" style="margin-left: 8px;">Show Spellchecker Button</label>
                     </div>
@@ -134,7 +140,7 @@
                 <hr>
                 <h4>Auto-Triggers (Persistent Guides)</h4> <!-- Heading for Auto-Triggers -->
                 <small class="setting_item_description">
-                    Auto Triggered Guides automatically run when you use a the vanilla Send command from ST and on Guided Response before the Response is being generated. They do not run on swipes (where it is expected that they have already run on the initial response and are current).
+                    Auto Triggered Guides automatically run when you use a the vanilla Send command from ST and on Guided Response before the Response is being generated. They do not run on swipes (where it is expected that they have already run on the initial response and are current). Separated Thinking runs after a normal response is generated and creates a corrected swipe.
                 </small>
                 <div class="setting_item">
                     <div style="display: flex; align-items: center; margin-bottom: 5px;">
@@ -152,6 +158,12 @@
                     <div style="display: flex; align-items: center; margin-bottom: 5px;">
                         <input type="checkbox" id="gg_autoTriggerThinking" name="autoTriggerThinking" class="gg-setting-input">
                         <label for="gg_autoTriggerThinking" style="margin-left: 8px;">Describe Thinking</label>
+                    </div>
+                </div>
+                <div class="setting_item">
+                    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                        <input type="checkbox" id="gg_autoTriggerSeparatedThinking" name="autoTriggerSeparatedThinking" class="gg-setting-input">
+                        <label for="gg_autoTriggerSeparatedThinking" style="margin-left: 8px;">Separated Thinking</label>
                     </div>
                 </div>
                 <!-- Custom Auto Guide Auto Trigger -->
@@ -338,6 +350,23 @@
                         <div style="flex: 1;">
                             <label for="presetCorrections" style="margin-bottom: 5px; display: block;">Corrections Preset:</label>
                             <select id="presetCorrections" name="presetCorrections" class="gg-setting-input text_pole select_compact">
+                                <!-- Preset options will be populated by the extension -->
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting_item">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label for="profileSeparatedThinking" style="margin-bottom: 5px; display: block;">Separated Thinking Profile:</label>
+                            <select id="profileSeparatedThinking" name="profileSeparatedThinking" class="gg-setting-input text_pole select_compact">
+                                <option value="">None</option>
+                                <!-- Profile options will be populated by the extension -->
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="presetSeparatedThinking" style="margin-bottom: 5px; display: block;">Separated Thinking Preset:</label>
+                            <select id="presetSeparatedThinking" name="presetSeparatedThinking" class="gg-setting-input text_pole select_compact">
                                 <!-- Preset options will be populated by the extension -->
                             </select>
                         </div>
@@ -559,6 +588,17 @@
                             <label for="gg_rawPromptCorrections" style="margin-left:4px;">Raw</label>
                             <label for="gg_depthPromptCorrections" style="margin-left:8px;">Depth:</label>
                             <input type="number" id="gg_depthPromptCorrections" name="depthPromptCorrections" class="gg-setting-input" min="0" style="width: 50px; margin-left:4px;">
+                        </div>
+                    </div>
+                    <div class="setting_item">
+                        <label for="gg_promptSeparatedThinking" style="margin-left: 8px; min-width:150px; display:block;">Separated Thinking Prompt</label>
+                        <textarea id="gg_promptSeparatedThinking" name="promptSeparatedThinking" class="gg-setting-input text_pole" rows="5" style="width:100%; margin-left:8px; min-width:200px;"></textarea>
+                        <div style="display: flex; align-items: center; margin-top: 4px;">
+                            <button type="button" class="gg-default-button" data-target="promptSeparatedThinking" style="margin-top:4px;">Default</button>
+                            <input type="checkbox" id="gg_rawPromptSeparatedThinking" name="rawPromptSeparatedThinking" class="gg-setting-input" style="margin-left:8px;">
+                            <label for="gg_rawPromptSeparatedThinking" style="margin-left:4px;">Raw</label>
+                            <label for="gg_depthPromptSeparatedThinking" style="margin-left:8px;">Depth:</label>
+                            <input type="number" id="gg_depthPromptSeparatedThinking" name="depthPromptSeparatedThinking" class="gg-setting-input" min="0" style="width: 50px; margin-left:4px;">
                         </div>
                     </div>
                     <div class="setting_item">

@@ -89,7 +89,7 @@ const defaultSettings = {
 };
 
 // Utility functions
-import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType } from '../utils/presetUtils.js';
+import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType, handleSwitching } from '../utils/presetUtils.js';
 import { requestCompletion, shouldUseDirectCall } from '../utils/llmClient.js';
 
 // Guide functions
@@ -114,6 +114,7 @@ import { corrections } from '../tools/corrections.js';
 import { spellchecker } from '../tools/spellchecker.js';
 import editIntros from '../tools/editIntros.js';
 import clearInput from '../tools/clearInput.js';
+import separatedThinking from '../tools/separatedThinking.js';
 
 // Main script functions
 import { guidedSwipe, generateNewSwipe } from '../guidedSwipe.js';
@@ -155,6 +156,7 @@ export {
     getProfileList,
     getConnectApiMap,
     extractApiIdFromApiType,
+    handleSwitching,
     requestCompletion,
     shouldUseDirectCall,
     
@@ -181,6 +183,7 @@ export {
     clearInput,
     corrections,
     editIntros,
+    separatedThinking,
     spellchecker,
     
     // Main script functions

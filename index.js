@@ -179,6 +179,7 @@ export const defaultSettings = {
     autoTriggerClothes: false, // Default off
     autoTriggerState: false,   // Default off
     autoTriggerThinking: false, // Default off
+    autoTriggerSeparatedThinking: false, // Default off
     enableAutoCustomAutoGuide: false, // Default off for auto-triggering the new guide
     showImpersonate1stPerson: true, // Default on
     showImpersonate2ndPerson: false, // Default off
@@ -190,6 +191,7 @@ export const defaultSettings = {
     showRecoverInputButton: false,
     showEditIntrosButton: false,
     showCorrectionsButton: false,
+    showSeparatedThinkingButton: false,
     showSpellcheckerButton: false,
     showClearInputButton: false,
     showUndoButton: false, // Default off for Undo Last Addition button
@@ -220,6 +222,9 @@ export const defaultSettings = {
     profileCorrections: '', // Profile for Corrections
     presetCorrections: '',
     profileCorrectionsApiType: '', // API type for Corrections profile
+    profileSeparatedThinking: '', // Profile for Separated Thinking
+    presetSeparatedThinking: '',
+    profileSeparatedThinkingApiType: '', // API type for Separated Thinking profile
     profileSpellchecker: '', // Profile for Spellchecker
     presetSpellchecker: '',
     profileSpellcheckerApiType: '', // API type for Spellchecker profile
@@ -256,6 +261,7 @@ export const defaultSettings = {
     promptSituational: '[OOC: Answer me out of Character! Don\'t continue the RP.  Analyze the chat history and provide a concise summary of: 1. Current location and setting (indoors/outdoors, time of day, weather if relevant) 2. Present characters and their current activities 3. Relevant objects, items, or environmental details that could influence interactions 4. Recent events or topics of conversation (last 10-20 messages) Keep the overview factual and neutral without speculation. Format in clear paragraphs.] ',
     promptRules: '[OOC: Answer me out of Character! Don\'t continue the RP.  Create a list of explicit rules that {{char}} has learned and follows from the story and their character description. Only include rules explicitly established in chat history or character info. Format as a numbered list.] ',
     promptCorrections: '[OOC: Answer me out of Character! Don\'t continue the RP.  Do not continue the story do not wrote in character, instead write {{char}}\'s last response (msgtorework) again but change it to reflect the following: {{input}}. Don\'t make any other changes besides this.]',
+    promptSeparatedThinking: '[OOC: Answer out of character. Do not continue the RP. You are correcting the currently shown message using the complete chat for context.\n\nComplete chat:\n{{chat}}\n\nCurrently shown message to correct:\n{{message}}\n\nTask:\n1. Identify every logical, situational, continuity, spatial, factual, motivation, and behavioural error in the currently shown message.\n2. Think about each error separately and decide the best possible fix while considering that you may ONLY change the currently shown message.\n3. Implement all fixes in one revised version of the currently shown message.\n4. Keep the message as close to the original as possible except where a fix is needed.\n5. Do not explain the errors. Do not include analysis, bullet points, labels, quotes, or code fences.\n6. Return ONLY the corrected message text.]',
             promptSpellchecker: 'Without any intro or outro correct the grammar, punctuation and improve the paragraph\'s flow without adding anything else of: {{input}}',
     promptImpersonate1st: 'Write in first Person perspective from {{user}}. {{input}}',
     promptImpersonate2nd: 'Write in second Person perspective from {{user}}, using you/yours for {{user}}. {{input}}',
@@ -271,6 +277,7 @@ export const defaultSettings = {
     rawPromptSituational: false,
     rawPromptRules: false,
     rawPromptCorrections: false,
+    rawPromptSeparatedThinking: false,
     rawPromptSpellchecker: false,
     rawPromptCustomAuto: false, // Default raw prompt setting for Custom Auto Guide
     // Depth settings for prompt overrides
@@ -280,6 +287,7 @@ export const defaultSettings = {
     depthPromptSituational: 1,
     depthPromptRules: 0,
     depthPromptCorrections: 0,
+    depthPromptSeparatedThinking: 0,
     depthPromptGuidedResponse: 0,
     depthPromptGuidedSwipe: 0,
     depthPromptCustomAuto: 1, // Default depth for Custom Auto Guide
@@ -345,7 +353,7 @@ function migrateProfileSettings() {
     // List of all preset keys that need corresponding profile keys
     const presetKeys = [
         'presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules',
-        'presetCustom', 'presetCorrections', 'presetSpellchecker', 'presetEditIntros',
+        'presetCustom', 'presetCorrections', 'presetSeparatedThinking', 'presetSpellchecker', 'presetEditIntros',
         'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd',
         'presetCustomAuto', 'presetFun'
     ];
@@ -402,7 +410,7 @@ async function updateSettingsUI() {
             debugLog(`[${extensionName}] Profile list received:`, profileList);
             
             const profileKeys = ['profileClothes','profileState','profileThinking','profileSituational','profileRules',
-             'profileCustom','profileCorrections','profileSpellchecker','profileEditIntros',
+             'profileCustom','profileCorrections','profileSeparatedThinking','profileSpellchecker','profileEditIntros',
              'profileImpersonate1st','profileImpersonate2nd','profileImpersonate3rd',
              'profileCustomAuto','profileFun','profileTrackerDetermine','profileTrackerUpdate'
             ];
@@ -438,7 +446,7 @@ async function updateSettingsUI() {
 
         // Populate preset dropdowns with correct presets for selected profiles
         ['presetClothes','presetState','presetThinking','presetSituational','presetRules',
-         'presetCustom','presetCorrections','presetSpellchecker','presetEditIntros',
+         'presetCustom','presetCorrections','presetSeparatedThinking','presetSpellchecker','presetEditIntros',
          'presetImpersonate1st','presetImpersonate2nd','presetImpersonate3rd',
          'presetCustomAuto','presetFun','presetTrackerDetermine','presetTrackerUpdate'
         ].forEach(async (key) => {
@@ -465,7 +473,7 @@ async function updateSettingsUI() {
         });
 
         // Populate guide prompt override textareas
-        ['promptClothes','promptState','promptThinking','promptSituational','promptRules','promptCorrections','promptSpellchecker','promptImpersonate1st','promptImpersonate2nd','promptImpersonate3rd','promptGuidedResponse','promptGuidedSwipe','promptGuidedContinue','customAutoGuidePrompt'].forEach(key => {
+        ['promptClothes','promptState','promptThinking','promptSituational','promptRules','promptCorrections','promptSeparatedThinking','promptSpellchecker','promptImpersonate1st','promptImpersonate2nd','promptImpersonate3rd','promptGuidedResponse','promptGuidedSwipe','promptGuidedContinue','customAutoGuidePrompt'].forEach(key => {
             const textarea = document.getElementById(`gg_${key}`);
             if (textarea) {
                 textarea.value = extension_settings[extensionName][key] ?? defaultSettings[key] ?? '';
@@ -473,7 +481,7 @@ async function updateSettingsUI() {
         });
 
         // Populate depth number input fields
-        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe'].forEach(key => {
+        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe'].forEach(key => {
             const input = document.getElementById(`gg_${key}`);
             if (input) {
                 input.value = extension_settings[extensionName][key] ?? defaultSettings[key] ?? 0; // Default to 0 if undefined
@@ -575,8 +583,8 @@ function handleSettingChange(event) {
         settingValue = target.value;
         
         // Handle preset and profile dropdowns - no validation needed as values are preset IDs or profile names
-        const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
-        const profileFields = ['profileClothes', 'profileState', 'profileThinking', 'profileSituational', 'profileRules', 'profileCustom', 'profileCorrections', 'profileSpellchecker', 'profileEditIntros', 'profileImpersonate1st', 'profileImpersonate2nd', 'profileImpersonate3rd', 'profileCustomAuto', 'profileFun', 'profileTracker'];
+        const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSeparatedThinking', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
+        const profileFields = ['profileClothes', 'profileState', 'profileThinking', 'profileSituational', 'profileRules', 'profileCustom', 'profileCorrections', 'profileSeparatedThinking', 'profileSpellchecker', 'profileEditIntros', 'profileImpersonate1st', 'profileImpersonate2nd', 'profileImpersonate3rd', 'profileCustomAuto', 'profileFun', 'profileTracker'];
         if (presetFields.includes(settingName) || profileFields.includes(settingName)) {
             // Values are preset IDs (numbers) or profile names, no pipe validation needed
             settingValue = settingValue.trim();
@@ -587,7 +595,7 @@ function handleSettingChange(event) {
             settingValue = settingValue.trim().replace(/\r?\n/g, '\n');
             
             // Validate preset fields to prevent pipe characters
-            const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
+            const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSeparatedThinking', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
             if (presetFields.includes(settingName) && settingValue.includes('|')) {
                 console.warn(`${extensionName}: Preset value cannot contain pipe character (|)`);
                 // Remove pipe characters and update the input field
@@ -601,7 +609,7 @@ function handleSettingChange(event) {
             settingValue = settingValue.trim().replace(/\r?\n/g, '\n');
             
             // Validate preset fields to prevent pipe characters
-            const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
+            const presetFields = ['presetClothes', 'presetState', 'presetThinking', 'presetSituational', 'presetRules', 'presetCustom', 'presetCorrections', 'presetSeparatedThinking', 'presetSpellchecker', 'presetEditIntros', 'presetImpersonate1st', 'presetImpersonate2nd', 'presetImpersonate3rd', 'presetCustomAuto'];
             if (presetFields.includes(settingName) && settingValue.includes('|')) {
                 console.warn(`${extensionName}: Preset value cannot contain pipe character (|)`);
                 // Remove pipe characters and update the input field
@@ -869,6 +877,23 @@ function updateExtensionButtons() {
             }
         });
 
+        // 3. Separated Thinking
+        const separatedThinkingMenuItem = document.createElement('a');
+        separatedThinkingMenuItem.href = '#';
+        separatedThinkingMenuItem.className = 'interactable';
+        separatedThinkingMenuItem.innerHTML = '<i class="fa-solid fa-brain fa-fw"></i><span data-i18n="Separated Thinking">Separated Thinking</span>';
+        separatedThinkingMenuItem.title = "Analyzes the currently shown message for logical, situational, and behavioural errors, then appends a corrected swipe.";
+        separatedThinkingMenuItem.addEventListener('click', async (event) => {
+            try {
+                const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
+                await separatedThinking();
+                ggToolsMenu.classList.remove('shown');
+                event.stopPropagation();
+            } catch (error) {
+                console.error('[GuidedGenerations] Failed to import or execute Separated Thinking:', error);
+            }
+        });
+
         // 3. Spellchecker
         const spellcheckerMenuItem = document.createElement('a');
         spellcheckerMenuItem.href = '#';
@@ -969,6 +994,7 @@ function updateExtensionButtons() {
         // Add new items after the separator
         ggToolsMenu.appendChild(editIntrosMenuItem);
         ggToolsMenu.appendChild(correctionsMenuItem);
+        ggToolsMenu.appendChild(separatedThinkingMenuItem);
         ggToolsMenu.appendChild(spellcheckerMenuItem);
         ggToolsMenu.appendChild(clearInputMenuItem);
         ggToolsMenu.appendChild(helpMenuItem);
@@ -1214,6 +1240,19 @@ function updateExtensionButtons() {
             }
         });
         regularButtons.push(correctionsButton);
+    }
+
+    // Separated Thinking button
+    if (settings.showSeparatedThinkingButton) {
+        const separatedThinkingButton = createActionButton('gg_separated_thinking_button', 'Separated Thinking', 'fa-solid fa-brain', async () => {
+            try {
+                const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
+                await separatedThinking();
+            } catch (error) {
+                console.error('[GuidedGenerations] Action button: Failed to import or execute Separated Thinking:', error);
+            }
+        });
+        regularButtons.push(separatedThinkingButton);
     }
     
     // Spellchecker button
@@ -1549,6 +1588,8 @@ async function installPreset() {
 
 // Debounced version of the counter update function
 let updatePersistentGuideCounterDebounced;
+let shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
+let separatedThinkingAutoTriggerRunning = false;
 
 
 // Run setup after page load
@@ -1689,6 +1730,8 @@ $(document).ready(async function () {
             stackTrace: new Error().stack
         });
 
+        shouldAutoTriggerSeparatedThinkingAfterGeneration = (type === 'normal' || typeof type === 'undefined') && !dryRun && !generateArgsObject?.signal;
+
         // Condition for auto-triggering guides
         if ((type === 'normal' || typeof type === 'undefined') && !dryRun && !generateArgsObject?.signal) {
             const settings = extension_settings[extensionName];
@@ -1799,6 +1842,43 @@ $(document).ready(async function () {
                     console.error('[GuidedGenerations] Failed to restore ephemeral "instruct" injection:', error);
                 }
             }
+        }
+    });
+
+    eventSource.on(context.eventTypes.GENERATION_ENDED, async () => {
+        const settings = extension_settings[extensionName];
+        if (!settings?.autoTriggerSeparatedThinking) {
+            shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
+            return;
+        }
+
+        if (!shouldAutoTriggerSeparatedThinkingAfterGeneration || separatedThinkingAutoTriggerRunning) {
+            debugLog('[SeparatedThinking][Auto] Skipping auto-trigger.', {
+                shouldAutoTriggerSeparatedThinkingAfterGeneration,
+                separatedThinkingAutoTriggerRunning,
+            });
+            return;
+        }
+
+        shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
+        separatedThinkingAutoTriggerRunning = true;
+        try {
+            debugLog('[SeparatedThinking][Auto] Running after normal generation ended.');
+            // Let SillyTavern finish saving/rendering the just-generated message before swiping it.
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const context = getContext();
+            const lastMessage = context?.chat?.[context.chat.length - 1];
+            if (!lastMessage || lastMessage.is_user || lastMessage.is_system) {
+                debugLog('[SeparatedThinking][Auto] Last message is not an assistant message; skipping.');
+                return;
+            }
+
+            const { separatedThinking } = await import('./scripts/persistentGuides/guideExports.js');
+            await separatedThinking({ suppressAlerts: true });
+        } catch (error) {
+            console.error('[GuidedGenerations] Auto Separated Thinking failed:', error);
+        } finally {
+            separatedThinkingAutoTriggerRunning = false;
         }
     });
 
