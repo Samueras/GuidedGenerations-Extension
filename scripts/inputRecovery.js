@@ -1,5 +1,5 @@
 // scripts/inputRecovery.js
-import { getPreviousImpersonateInput, debugLog } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getNextRecoverableInput, debugLog } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const recoverInput = () => {
 	debugLog('[InputRecovery] Button clicked');
@@ -11,7 +11,11 @@ const recoverInput = () => {
 	}
 
 	try {
-		const previousInput = getPreviousImpersonateInput();
+		const previousInput = getNextRecoverableInput();
+		if (!previousInput) {
+			debugLog('[InputRecovery] No recoverable input found.');
+			return;
+		}
 		debugLog(`[InputRecovery] Recovering input: "${previousInput}"`);
 		textarea.value = previousInput;
 		// Dispatch event for UI updates

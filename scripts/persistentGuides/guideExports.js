@@ -27,9 +27,38 @@ function debugWarn(...args) {
 // Shared state functions for impersonate input management
 let previousImpersonateInput = '';
 let lastImpersonateResult = '';
+const RECOVERABLE_INPUT_HISTORY_LIMIT = 10;
+let recoverableInputHistory = [];
+let recoverableInputCycleIndex = 0;
+
+function addRecoverableInput(input) {
+    const normalizedInput = typeof input === 'string' ? input : '';
+    if (!normalizedInput) return;
+
+    // Avoid consecutive duplicates while preserving older history entries.
+    if (recoverableInputHistory[0] === normalizedInput) {
+        recoverableInputCycleIndex = 0;
+        return;
+    }
+
+    recoverableInputHistory.unshift(normalizedInput);
+    if (recoverableInputHistory.length > RECOVERABLE_INPUT_HISTORY_LIMIT) {
+        recoverableInputHistory = recoverableInputHistory.slice(0, RECOVERABLE_INPUT_HISTORY_LIMIT);
+    }
+    recoverableInputCycleIndex = 0;
+}
+
+function getNextRecoverableInput() {
+    if (!recoverableInputHistory.length) return '';
+
+    const value = recoverableInputHistory[recoverableInputCycleIndex];
+    recoverableInputCycleIndex = (recoverableInputCycleIndex + 1) % recoverableInputHistory.length;
+    return value;
+}
 
 function setPreviousImpersonateInput(input) {
     previousImpersonateInput = input;
+    addRecoverableInput(input);
 }
 
 function getPreviousImpersonateInput() {
@@ -38,6 +67,7 @@ function getPreviousImpersonateInput() {
 
 function setLastImpersonateResult(result) {
     lastImpersonateResult = result;
+    addRecoverableInput(result);
 }
 
 function getLastImpersonateResult() {
@@ -215,6 +245,8 @@ export {
     isGroupChat,
     setPreviousImpersonateInput,
     getPreviousImpersonateInput,
+    addRecoverableInput,
+    getNextRecoverableInput,
     setLastImpersonateResult,
     getLastImpersonateResult,
     
