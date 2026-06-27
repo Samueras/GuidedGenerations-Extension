@@ -91,18 +91,26 @@ const guidedResponse = async () => {
     // Execute the main stscript command
     if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext === 'function') {
         const context = SillyTavern.getContext();
+        let shouldGenerate = true;
         try {
             if (needsGroupSelection && groupCharacterListJson !== '[]') {
                 const selectionResult = await context.executeSlashCommandsWithOptions(
                     `/buttons labels=${groupCharacterListJson} "Select member to respond as"`,
                     { showOutput: false, handleExecutionErrors: true }
                 );
-                const selectedCharacter = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
+                const rawSelection = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
 
-                if (selectedCharacter) {
-                    const selectedIndex = groupCharacterNames.findIndex(name => name === selectedCharacter);
-                    const shouldUseIndex = /^\d/.test(selectedCharacter) && selectedIndex >= 0;
-                    const triggerArg = shouldUseIndex ? String(selectedIndex) : JSON.stringify(selectedCharacter);
+                // /buttons returns an empty string when the popup is cancelled.
+                // Guard strictly: only proceed when a real selection was made and
+                // it actually matches one of the known group member names.
+                // Otherwise abort the whole guided response — do NOT generate.
+                if (!rawSelection || !groupCharacterNames.includes(rawSelection)) {
+                    debugLog('[Response] Group selection cancelled or invalid; aborting guided response (no generation).');
+                    shouldGenerate = false;
+                } else {
+                    const selectedIndex = groupCharacterNames.findIndex(name => name === rawSelection);
+                    const shouldUseIndex = /^\d/.test(rawSelection) && selectedIndex >= 0;
+                    const triggerArg = shouldUseIndex ? String(selectedIndex) : JSON.stringify(rawSelection);
                     if (shouldUseIndex) {
                         debugLog(`[Response] Using group member index ${selectedIndex} for numeric-prefixed name.`);
                     }
@@ -111,16 +119,15 @@ const guidedResponse = async () => {
 /inject id=instruct position=chat ephemeral=true scan=true depth=${depth} role=${injectionRole} ${filledPrompt}|
 /trigger await=true ${triggerArg}|
 `;
-                } else {
-                    debugLog('[Response] Group selection cancelled; aborting guided response.');
-                    return;
                 }
             }
 
-            // Execute the main command
-            await context.executeSlashCommandsWithOptions(stscriptCommand);
-
-            debugLog('[Response] Executed Command:', stscriptCommand); // Log the command
+            // Only execute the generation command if a selection was confirmed
+            // (or no selection was required in the first place).
+            if (shouldGenerate && stscriptCommand) {
+                await context.executeSlashCommandsWithOptions(stscriptCommand);
+                debugLog('[Response] Executed Command:', stscriptCommand); // Log the command
+            }
             
         } catch (error) {
             console.error(`[GuidedGenerations][Response] Error executing Guided Response stscript: ${error}`);

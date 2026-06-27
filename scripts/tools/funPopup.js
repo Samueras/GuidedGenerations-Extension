@@ -211,8 +211,14 @@ export class FunPopup {
                             `/buttons labels=${characterListJson} "Select character to respond"`,
                             { showOutput: false, handleExecutionErrors: true }
                         );
-                        if (selectionResult?.pipe) {
-                            selectedCharacter = String(selectionResult.pipe).trim();
+                        const rawSelection = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
+                        // /buttons returns empty string on cancel. Only accept the
+                        // selection if it matches a known character name; otherwise abort.
+                        if (rawSelection && characterList.includes(rawSelection)) {
+                            selectedCharacter = rawSelection;
+                        } else {
+                            debugLog('[FunPopup] Group selection cancelled or invalid; aborting fun prompt.');
+                            return;
                         }
                     }
                 }
@@ -290,8 +296,11 @@ export class FunPopup {
                             `/buttons labels=${characterListJson} "Select character to respond"`,
                             { showOutput: false, handleExecutionErrors: true }
                         );
-                        if (selectionResult?.pipe) {
-                            selectedCharacter = String(selectionResult.pipe).trim();
+                        const rawSelection = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
+                        // /buttons returns empty string on cancel. Only accept the
+                        // selection if it matches a known character name.
+                        if (rawSelection && characterNames.includes(rawSelection)) {
+                            selectedCharacter = rawSelection;
                         }
                     }
 
