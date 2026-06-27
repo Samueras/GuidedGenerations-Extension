@@ -1,7 +1,19 @@
 /**
  * @file Contains the logic for the Spellcheck tool.
  */
-import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from '../persistentGuides/guideExports.js';
+import {
+    extension_settings,
+    extensionName,
+    debugLog,
+    requestCompletion,
+    shouldUseDirectCall,
+    getPromptValue,
+    fillPromptTemplate,
+    setPreviousImpersonateInput,
+    deactivateSendButtons,
+    activateSendButtons,
+    setSendButtonState,
+} from '../persistentGuides/guideExports.js';
 
 const spellchecker = async () => {
     const textarea = document.getElementById('send_textarea');
@@ -10,15 +22,15 @@ const spellchecker = async () => {
         return;
     }
     const currentInputText = textarea.value;
-    
+
     // Resolve target profile and preset from settings
     const profileKey = 'profileSpellchecker';
     const presetKey = 'presetSpellchecker';
     const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
     const presetValue = extension_settings[extensionName]?.[presetKey] ?? '';
-    
+
     debugLog(`[Spellchecker] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
-    
+
     // Use user-defined spellchecker prompt override
     const promptTemplate = await getPromptValue('promptSpellchecker', '', {
         settings: extension_settings[extensionName],
@@ -41,11 +53,24 @@ const spellchecker = async () => {
         } else {
             const context = SillyTavern.getContext();
             if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                const result = await context.executeSlashCommandsWithOptions(`/genraw ${filledPrompt}`, {
-                    showOutput: false,
-                    handleExecutionErrors: true,
-                });
-                resultText = result?.pipe || '';
+                // Match existing extension behavior used by requestCompletion so
+                // the native send-button working spinner is visible here too.
+                try {
+                    setSendButtonState?.(true);
+                    deactivateSendButtons?.();
+                    const result = await context.executeSlashCommandsWithOptions(`/genraw ${filledPrompt}`, {
+                        showOutput: false,
+                        handleExecutionErrors: true,
+                    });
+                    resultText = result?.pipe || '';
+                } finally {
+                    activateSendButtons?.();
+                    setSendButtonState?.(false);
+                    requestAnimationFrame(() => {
+                        activateSendButtons?.();
+                        setSendButtonState?.(false);
+                    });
+                }
             } else {
                 console.error('[GuidedGenerations] context.executeSlashCommandsWithOptions not found!');
             }
@@ -53,6 +78,7 @@ const spellchecker = async () => {
 
         if (resultText && resultText.trim() !== '') {
             debugLog('[Spellchecker] Got corrected result, pasting into textarea.');
+            setPreviousImpersonateInput(currentInputText);
             textarea.value = resultText;
             textarea.dispatchEvent(new Event('input', { bubbles: true }));
             debugLog('[Spellchecker] Corrected result pasted into textarea successfully');
