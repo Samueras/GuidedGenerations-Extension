@@ -48,12 +48,23 @@ function addRecoverableInput(input) {
     recoverableInputCycleIndex = 0;
 }
 
-function getNextRecoverableInput() {
+function getNextRecoverableInput(currentInput = '') {
     if (!recoverableInputHistory.length) return '';
 
-    const value = recoverableInputHistory[recoverableInputCycleIndex];
-    recoverableInputCycleIndex = (recoverableInputCycleIndex + 1) % recoverableInputHistory.length;
-    return value;
+    const normalizedCurrentInput = typeof currentInput === 'string' ? currentInput : '';
+    const historyLength = recoverableInputHistory.length;
+
+    for (let offset = 0; offset < historyLength; offset++) {
+        const idx = (recoverableInputCycleIndex + offset) % historyLength;
+        const candidate = recoverableInputHistory[idx];
+        if (candidate !== normalizedCurrentInput) {
+            recoverableInputCycleIndex = (idx + 1) % historyLength;
+            return candidate;
+        }
+    }
+
+    // All entries match current input (or history is degenerate); keep state stable.
+    return '';
 }
 
 function setPreviousImpersonateInput(input) {

@@ -11,7 +11,7 @@ const recoverInput = () => {
 	}
 
 	try {
-		const previousInput = getNextRecoverableInput();
+		const previousInput = getNextRecoverableInput(textarea.value);
 		if (!previousInput) {
 			debugLog('[InputRecovery] No recoverable input found.');
 			return;
