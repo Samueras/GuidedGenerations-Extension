@@ -293,7 +293,7 @@ export const defaultSettings = {
     depthPromptGuidedResponse: 0,
     depthPromptGuidedSwipe: 0,
     depthPromptCustomAuto: 1, // Default depth for Custom Auto Guide
-    LastPatchNoteVersion: '1.4.3' // Default extension version for patch notes
+    LastPatchNoteVersion: '1.7.0' // Default extension version for patch notes
 };
 
 const PROMPT_SETTING_KEYS = [
@@ -1934,8 +1934,12 @@ async function checkVersionAndNotify() {
     // If version in settings is undefined, null, empty, or older than default
     if (!currentVersionInSettings || currentVersionInSettings < defaultVersion) {
         const popupTitle = `${extensionName} v${defaultVersion} Updated`;
-        const messageContent = `This version includes an update to Auto-Triggered Guides: they now also run when you use the normal SillyTavern Send button (or press Enter to send), in addition to when using the Guided Response button.\n\nMany of the default Prompts for the Guides have also been updated. If you are still using the defaults, you might want to get the new defaults for a better experience.`;
-        
+        const messageContent = `This version reworks how Presets and Profiles are used.\n\n` +
+            `The extension no longer globally switches your active profile/preset while a guide runs. Instead each guide or tool builds its own request from the profile/preset you select for it, using your current connection as the baseline.\n\n` +
+            `A new built-in "GG Internal Helper Preset" is now the default for Clothes, State, Thinking, Situational, Rules, Custom, Custom Auto, Corrections, Separated Thinking, Spellchecker, and the Stat Tracker calls. It keeps your current model and context settings but uses a focused helper prompt layout with its own Max Response Tokens. You can change it back to "None" per guide if you prefer.\n\n` +
+            `Tip: use the "Set Defaults" button in the Preset Usage section to quickly (re-)apply these recommended defaults.\n\n` +
+            `Two smaller additions worth noting: prompts can now be edited externally via prompts.json (see the Guide Prompt Overrides section), and there is a new "Separated Thinking" tool that corrects the shown AI message using the full chat for context.`;
+
         const userAcknowledged = await showVersionNotification(popupTitle, messageContent);
 
         if (userAcknowledged) {

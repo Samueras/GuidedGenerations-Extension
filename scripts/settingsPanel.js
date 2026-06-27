@@ -214,6 +214,34 @@ export async function loadSettingsPanel() {
                     });
                 }
 
+                // Setup "Set Defaults" button: applies the GG Internal Helper Preset
+                // to every eligible guide/tool preset dropdown, leaving profiles as-is.
+                const setDefaultsButton = container.querySelector('#gg_setDefaultPresets');
+                if (setDefaultsButton) {
+                    setDefaultsButton.addEventListener('click', () => {
+                        const ELIGIBLE = [
+                            'presetClothes', 'presetState', 'presetThinking', 'presetSituational',
+                            'presetRules', 'presetCustom', 'presetCustomAuto', 'presetCorrections',
+                            'presetSeparatedThinking', 'presetSpellchecker',
+                            'presetTrackerDetermine', 'presetTrackerUpdate',
+                        ];
+                        let applied = 0;
+                        ELIGIBLE.forEach((id) => {
+                            const select = container.querySelector(`#${id}`);
+                            if (select) {
+                                select.value = INTERNAL_HELPER_PRESET_VALUE;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                                applied += 1;
+                            }
+                        });
+                        const statusEl = container.querySelector('#profileDebugStatus');
+                        if (statusEl) {
+                            statusEl.textContent = `✓ Applied helper preset to ${applied} guides/tools.`;
+                            statusEl.style.color = 'green';
+                        }
+                    });
+                }
+
                 // Setup debug logging buttons
                 const copyDebugLogsButton = container.querySelector('#gg_copyDebugLogs');
                 if (copyDebugLogsButton) {
