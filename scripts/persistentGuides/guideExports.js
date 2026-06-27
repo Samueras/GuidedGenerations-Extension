@@ -130,7 +130,7 @@ const defaultSettings = {
 };
 
 // Utility functions
-import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType, handleSwitching } from '../utils/presetUtils.js';
+import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType } from '../utils/presetUtils.js';
 import { requestCompletion, shouldUseDirectCall } from '../utils/llmClient.js';
 import { getPromptObject, getPromptValue, fillPromptTemplate, loadPromptCatalog } from '../utils/promptManager.js';
 
@@ -198,7 +198,6 @@ export {
     getProfileList,
     getConnectApiMap,
     extractApiIdFromApiType,
-    handleSwitching,
     requestCompletion,
     shouldUseDirectCall,
     getPromptObject,

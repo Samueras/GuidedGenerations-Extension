@@ -6,21 +6,14 @@ import {
     extension_settings,
     extensionName,
     debugLog,
-    generateNewSwipe,
-    handleSwitching,
+    requestCompletion,
+    shouldUseDirectCall,
+    getProfileApiType,
+    getCurrentProfile,
+    extractApiIdFromApiType,
     getPromptValue,
     fillPromptTemplate,
 } from '../persistentGuides/guideExports.js';
-
-const SCRIPT_PROMPT_KEY = 'script_inject_';
-const INJECT_POSITIONS = {
-    chat: 1,
-};
-const INJECT_ROLES = {
-    system: 0,
-    user: 1,
-    assistant: 2,
-};
 
 function getMessageText(messageData) {
     if (!messageData) return '';
@@ -46,29 +39,57 @@ function getCurrentlyShownMessageIndex(context) {
     return context.chat.length - 1;
 }
 
-function setTemporaryInjection(context, id, value, { position = INJECT_POSITIONS.chat, depth = 0, scan = true, role = INJECT_ROLES.system } = {}) {
-    if (!context.chatMetadata.script_injects) {
-        context.chatMetadata.script_injects = {};
-    }
-
-    context.chatMetadata.script_injects[id] = { value, position, depth, scan, role, filter: null };
-    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${id}`, value, position, depth, scan, role);
-    context.saveMetadataDebounced?.();
+function resolveCompletionMode(apiType, apiId) {
+    const typeKey = String(apiId || apiType || '').toLowerCase();
+    const textApiIds = new Set([
+        'textgenerationwebui',
+        'kobold',
+        'koboldhorde',
+        'novel',
+        'novelai',
+        'textgen',
+        'text',
+        'llamacpp',
+    ]);
+    return textApiIds.has(typeKey) ? 'text' : 'chat';
 }
 
-function flushTemporaryInjection(context, id) {
-    const existingInject = context.chatMetadata?.script_injects?.[id];
-    const position = existingInject?.position ?? INJECT_POSITIONS.chat;
-    const depth = existingInject?.depth ?? 0;
-    const scan = existingInject?.scan ?? true;
-    const role = existingInject?.role ?? INJECT_ROLES.system;
+async function applySeparatedThinkingSwipe(context, messageIndex, correctedText) {
+    const messageData = context.chat[messageIndex];
+    if (!messageData) return;
 
-    if (context.chatMetadata?.script_injects) {
-        delete context.chatMetadata.script_injects[id];
+    if (!Array.isArray(messageData.swipes)) {
+        messageData.swipes = [messageData.mes];
     }
 
-    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${id}`, '', position, depth, scan, role);
-    context.saveMetadataDebounced?.();
+    messageData.swipes.push(correctedText);
+    messageData.swipe_id = messageData.swipes.length - 1;
+    messageData.mes = correctedText;
+
+    const mesDom = document.querySelector(`#chat .mes[mesid="${messageIndex}"]`);
+    if (mesDom && typeof context.messageFormatting === 'function') {
+        const mesTextElement = mesDom.querySelector('.mes_text');
+        if (mesTextElement) {
+            mesTextElement.innerHTML = context.messageFormatting(
+                messageData.mes,
+                messageData.name,
+                messageData.is_system,
+                messageData.is_user,
+                messageIndex,
+            );
+        }
+        [...mesDom.querySelectorAll('.swipes-counter')].forEach((it) => {
+            it.textContent = `${messageData.swipe_id + 1}/${messageData.swipes.length}`;
+        });
+    }
+
+    if (context.eventSource && context.event_types) {
+        context.eventSource.emit(context.event_types.MESSAGE_SWIPED, messageIndex);
+    }
+
+    if (typeof context.saveChat === 'function') {
+        await context.saveChat();
+    }
 }
 
 export default async function separatedThinking({ suppressAlerts = false } = {}) {
@@ -93,8 +114,6 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
     const settings = extension_settings[extensionName] || {};
     const profileValue = settings.profileSeparatedThinking ?? '';
     const presetValue = settings.presetSeparatedThinking ?? '';
-    const injectionRole = settings.injectionEndRole ?? 'system';
-    const role = INJECT_ROLES[String(injectionRole).toLowerCase()] ?? INJECT_ROLES.system;
     const promptTemplate = await getPromptValue('promptSeparatedThinking', '', { settings });
     const chatHistory = buildChatHistoryBlock(context.chat);
     const promptForModel = fillPromptTemplate(promptTemplate, {
@@ -106,24 +125,42 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
 
     debugLog(`[SeparatedThinking] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
 
-    let switching = null;
-    let injectionSet = false;
     try {
-        switching = await handleSwitching(profileValue, presetValue);
-        setTemporaryInjection(context, 'instruct', promptForModel, { role });
-        injectionSet = true;
-        await switching.switch();
-        await generateNewSwipe();
+        const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
+        let correctedText = '';
+
+        if (useDirectCall) {
+            correctedText = await requestCompletion({
+                profileName: profileValue,
+                presetName: presetValue,
+                prompt: promptForModel,
+                debugLabel: 'separatedThinking',
+                includeChatHistory: false,
+            });
+        } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
+            const effectiveProfile = profileValue || (await getCurrentProfile()) || '';
+            const apiType = await getProfileApiType(effectiveProfile);
+            const apiId = extractApiIdFromApiType(apiType) || apiType;
+            const completionMode = resolveCompletionMode(apiType, apiId);
+            const command = completionMode === 'text' ? '/gen' : '/genraw';
+            const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {
+                showOutput: false,
+                handleExecutionErrors: true,
+            });
+            correctedText = result?.pipe || '';
+        }
+
+        if (!correctedText || !correctedText.trim()) {
+            debugLog('[SeparatedThinking] No corrected text returned; skipping swipe append.');
+            return;
+        }
+
+        await applySeparatedThinkingSwipe(context, messageIndex, correctedText);
     } catch (error) {
         console.error('[GuidedGenerations][SeparatedThinking] Error:', error);
         if (!suppressAlerts) {
             alert(`Separated Thinking Error: ${error.message || 'An unexpected error occurred.'}`);
         }
-    } finally {
-        if (injectionSet) {
-            flushTemporaryInjection(context, 'instruct');
-        }
-        await switching?.restore();
     }
 }
 
