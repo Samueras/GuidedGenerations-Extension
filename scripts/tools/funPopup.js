@@ -8,15 +8,44 @@ import { getContext, extension_settings, extensionName, debugLog, requestComplet
 let FUN_PROMPTS = {};
 
 /**
+ * Parse a fun-prompts text file into the FUN_PROMPTS map.
+ * Custom prompts are appended on top of (and after) the built-in ones so they
+ * appear at the bottom of the list. Existing keys are overwritten if the
+ * custom file reuses them, which lets users override built-ins intentionally.
+ * @param {string} text - Raw file contents.
+ * @param {boolean} _isCustom - Unused for now, kept for clarity/log filtering.
+ */
+function parseFunPromptsFile(text, _isCustom = false) {
+    const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+    let added = 0;
+    lines.forEach(line => {
+        const parts = line.split('|');
+        if (parts.length >= 4) {
+            const [key, title, description, prompt] = parts;
+            const trimmedKey = key.trim();
+            if (!trimmedKey) return;
+            FUN_PROMPTS[trimmedKey] = {
+                title: title.trim(),
+                description: description.trim(),
+                prompt: prompt.trim(),
+            };
+            added += 1;
+        }
+    });
+    return added;
+}
+
+/**
  * Load fun prompts from the text file
  */
 async function loadFunPrompts() {
     try {
         // Use the correct path for SillyTavern extensions
-        const presetPath = `scripts/extensions/third-party/GuidedGenerations-Extension/scripts/tools/funPrompts.txt`;
-        
+        const basePath = `scripts/extensions/third-party/GuidedGenerations-Extension/scripts/tools`;
+        const presetPath = `${basePath}/funPrompts.txt`;
+
         const response = await fetch(presetPath);
-        
+
         if (!response.ok) {
             console.error(`${extensionName}: Failed to load fun prompts file. Status: ${response.status}`);
             if (response.status === 404) {
@@ -24,27 +53,29 @@ async function loadFunPrompts() {
             }
             return;
         }
-        
+
         debugLog(`${extensionName}: Successfully loaded fun prompts from:`, presetPath);
-        
+
         const text = await response.text();
-        const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('#'));
-        
         FUN_PROMPTS = {};
-        
-        lines.forEach(line => {
-            const parts = line.split('|');
-            if (parts.length >= 4) {
-                const [key, title, description, prompt] = parts;
-                FUN_PROMPTS[key.trim()] = {
-                    title: title.trim(),
-                    description: description.trim(),
-                    prompt: prompt.trim()
-                };
+        const builtInCount = parseFunPromptsFile(text, false);
+        debugLog(`${extensionName}: Loaded ${builtInCount} built-in fun prompts from file`);
+
+        // Optional user file: if present, its prompts are appended below the
+        // built-in ones. Missing file is the normal case — only log when found.
+        const customPath = `${basePath}/CustomFunPrompt.txt`;
+        try {
+            const customResponse = await fetch(customPath);
+            if (customResponse.ok) {
+                const customText = await customResponse.text();
+                const customCount = parseFunPromptsFile(customText, true);
+                debugLog(`${extensionName}: Loaded ${customCount} custom fun prompts from CustomFunPrompt.txt`);
             }
-        });
-        
-        debugLog(`${extensionName}: Loaded ${Object.keys(FUN_PROMPTS).length} fun prompts from file`);
+        } catch (customError) {
+            debugLog(`${extensionName}: No CustomFunPrompt.txt loaded (this is normal if you haven't created one).`);
+        }
+
+        debugLog(`${extensionName}: Total fun prompts available: ${Object.keys(FUN_PROMPTS).length}`);
     } catch (error) {
         console.error(`${extensionName}: Error loading fun prompts:`, error);
         // Fallback to empty prompts if file can't be loaded

@@ -25,3 +25,8 @@ Wiki/
 RELEASE_NOTES.md
 # Ignore windsufr rules file
 .windsurfrules
+
+# User-created custom fun prompts (template ships with the extension, the
+# actual custom file is created by the user and should not be committed)
+scripts/tools/CustomFunPrompt.txt
+

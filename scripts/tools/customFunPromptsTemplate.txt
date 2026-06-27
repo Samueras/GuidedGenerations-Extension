@@ -1,0 +1,31 @@
+# Custom Fun Prompts Configuration File
+#
+# This file is a TEMPLATE. It is shipped with the extension but is NOT loaded.
+# To use your own fun prompts you MUST:
+#   1. Make a COPY of this file in the SAME folder.
+#   2. Rename the copy to exactly:  CustomFunPrompt.txt
+#   3. Add your prompts to that renamed copy.
+#
+# The extension looks for a file named "CustomFunPrompt.txt" (note: singular
+# "Prompt", not "Prompts"). If that file exists, its prompts are appended
+# BELOW the built-in fun prompts in the popup list.
+#
+# Format: KEY|TITLE|DESCRIPTION|PROMPT
+#   - Each prompt must be on a SINGLE line.
+#   - Use | as the separator between the four fields.
+#   - The | characters inside the PROMPT field will break parsing, so do not
+#     use them inside your prompt text.
+#   - The PROMPT should NOT end with a closing bracket ] — it is added
+#     automatically by the extension.
+#   - Lines starting with # are treated as comments and ignored.
+#   - Blank lines are ignored.
+#   - If your KEY matches a built-in prompt key, your version replaces it.
+#
+# Available placeholders you can use inside PROMPT:
+#   {{user}}   - your persona name
+#   {{char}}   - the character's name
+#
+# Example entry (uncomment the line below to see it appear after renaming
+# this file to CustomFunPrompt.txt):
+#
+# my-custom-prompt|My Custom Prompt|A short description shown in the popup.|[Take the following into special consideration for your next message: do something fun here involving {{char}} and {{user}}

@@ -1942,10 +1942,12 @@ async function checkVersionAndNotify() {
     // If version in settings is undefined, null, empty, or older than default
     if (!currentVersionInSettings || currentVersionInSettings < defaultVersion) {
         const popupTitle = `${extensionName} v${defaultVersion} Updated`;
-        const messageContent = `A small follow-up to 1.7.0.\n\n` +
-            `Prompts from the external prompts.json file are now used by default. There's a new "Use prompts.json" checkbox next to each prompt in the settings — checked means the file is the source, unchecked means your own saved prompt is used instead.\n\n` +
-            `Important: If you have custom prompts that you want to keep using, uncheck that box for those prompts. Otherwise they will be replaced by the prompts.json defaults.\n\n` +
-            `Bug fixes in this version: the Guided Response "cancel" button now actually stops the generation, the Corrections popup now shows a working spinner while it runs, and correction swipes now properly reveal the swipe-back chevron.`;
+        const messageContent = `This version reworks how Presets and Profiles are used.\n\n` +
+            `The extension no longer globally switches your active profile/preset while a guide runs. Instead each guide or tool builds its own request from the profile/preset you select for it, using your current connection as the baseline.\n\n` +
+            `A new built-in "GG Internal Helper Preset" is now the default for Clothes, State, Thinking, Situational, Rules, Custom, Custom Auto, Corrections, Separated Thinking, Spellchecker, and the Stat Tracker calls. It keeps your current model and context settings but uses a focused helper prompt layout with its own Max Response Tokens. You can change it back to "None" per guide if you prefer.\n\n` +
+            `Tip: use the "Set Defaults" button in the Preset Usage section to quickly (re-)apply these recommended defaults.\n\n` +
+            `Two smaller additions worth noting: prompts can now be edited externally via prompts.json (see the Guide Prompt Overrides section), and there is a new "Separated Thinking" tool that corrects the shown AI message using the full chat for context.\n\n` +
+            `Note on prompts.json: by default the extension now reads prompts from prompts.json. Each prompt has a "Use prompts.json" checkbox. If you have custom prompts that you want to keep using, uncheck that box for those prompts — otherwise they will be replaced by the prompts.json defaults.`;
 
         const userAcknowledged = await showVersionNotification(popupTitle, messageContent);
 
