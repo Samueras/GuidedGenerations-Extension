@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Clothes option in the Persistent Guides menu.
  */
-import { extensionName, extension_settings } from './guideExports.js'; // Import from central hub
+import { extensionName, extension_settings, getPromptValue } from './guideExports.js'; // Import from central hub
 import { runGuideScript } from './runGuide.js';
 
 /**
@@ -12,10 +12,12 @@ import { runGuideScript } from './runGuide.js';
 const clothesGuide = async (isAuto = false) => {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
     const genAs = 'as=char';
-    const defaultPrompt = `[OOC: Answer me out of Character! Considering where we are currently in the story, write me a list entailing the clothes and look, what they are currently wearing of all participating characters, including {{user}}, that are present in the current scene. Don't mention People or clothing pieces who are no longer relevant to the ongoing scene.] `;
-    const genCommandSuffix = extension_settings[extensionName]?.promptClothes ?? defaultPrompt;
+    const genCommandSuffix = await getPromptValue('promptClothes', '', {
+        settings: extension_settings[extensionName],
+    });
     const depth = extension_settings[extensionName]?.depthPromptClothes ?? 1;
-    const finalCommand = `/inject id=clothes position=chat scan=true depth=${depth} role=${injectionRole} [Relevant Informations for portraying characters {{pipe}}] |`;
+    const injectionPrompt = await getPromptValue('persistentGuides.clothesInjection', '');
+    const finalCommand = `/inject id=clothes position=chat scan=true depth=${depth} role=${injectionRole} ${injectionPrompt} |`;
     return await runGuideScript({
         guideId: 'clothes',
         genAs,

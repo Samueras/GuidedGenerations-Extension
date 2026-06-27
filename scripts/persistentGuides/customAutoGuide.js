@@ -3,7 +3,7 @@
  */
 
 // Import necessary items from central hub
-import { getContext, extension_settings, extensionName } from './guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, getPromptValue } from './guideExports.js'; // Import from central hub
 import { runGuideScript } from './runGuide.js';
 
 /**
@@ -15,14 +15,17 @@ const customAutoGuide = async (isAuto = false) => {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
 
     // Allow override from settings, default to empty
-    const customPrompt = extension_settings[extensionName]?.customAutoGuidePrompt ?? '';
+    const customPrompt = await getPromptValue('customAutoGuidePrompt', '', {
+        settings: extension_settings[extensionName],
+    });
 
     const genAs = 'as=char'; // Default generation role, consider making this configurable if needed
     const genCommandSuffix = customPrompt; // Use the prompt from settings
 
     // Using a generic final command, adjust if specific formatting is needed
     const depth = extension_settings[extensionName]?.depthPromptCustomAuto ?? 1;
-    const finalCommand = `/inject id=customAuto position=chat scan=true depth=${depth} role=${injectionRole} [{{pipe}}] |`;
+    const injectionPrompt = await getPromptValue('persistentGuides.customAutoInjection', '');
+    const finalCommand = `/inject id=customAuto position=chat scan=true depth=${depth} role=${injectionRole} ${injectionPrompt} |`;
 
     return await runGuideScript({
         guideId: 'customAuto',

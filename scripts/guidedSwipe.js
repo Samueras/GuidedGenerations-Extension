@@ -1,6 +1,6 @@
 // scripts/guidedSwipe.js
 
-import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Helper function for delays
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -116,20 +116,11 @@ async function generateNewSwipe() {
         }
 
         debugLog("[Swipe] Calling context.swipe.right() to trigger new swipe generation...");
-        context.swipe.right(); // THE VITAL CALL TO START GENERATION
+        // Wait for SillyTavern's full swipe flow, including post-generation cleanup.
+        // GENERATION_ENDED fires before core endSwipe() restores swipe/send UI state.
+        await context.swipe.right();
 
-        // --- 3. Wait for Generation to Finish ---
-        const generationPromise = new Promise((resolve) => {
-            const successListener = () => {
-                debugLog("[Swipe] Generation ended signal received.");
-                resolve(true);
-            };
-
-            eventSource.once(event_types.GENERATION_ENDED, successListener);
-        });
-
-        // Await the generation promise (will throw on error)
-        await generationPromise;
+        debugLog("[Swipe] Swipe generation flow completed.");
         // Use standard setTimeout for delay as context.delay is missing
         await new Promise(resolve => setTimeout(resolve, 200)); // Small delay after generation finishes
 
@@ -189,8 +180,10 @@ const guidedSwipe = async () => {
         setPreviousImpersonateInput(originalInput);
 
         // Use user-defined guided swipe prompt override
-        const promptTemplate = extension_settings[extensionName]?.promptGuidedSwipe ?? '';
-        const filledPrompt = promptTemplate.replace('{{input}}', originalInput);
+        const promptTemplate = await getPromptValue('promptGuidedSwipe', '', {
+            settings: extension_settings[extensionName],
+        });
+        const filledPrompt = fillPromptTemplate(promptTemplate, { input: originalInput });
 
         // --- 1. Store Input & Inject Context (if any) --- (Use direct context method)
         if (originalInput.trim() || (promptTemplate.trim() !== '' && promptTemplate.trim() !== '{{input}}')) {

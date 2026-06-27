@@ -1,4 +1,4 @@
-import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const extensionName = "GuidedGenerations-Extension";
 
@@ -73,10 +73,12 @@ const guidedContinue = async () => {
     setPreviousImpersonateInput(originalInputFromTextarea);
 
     // --- Get Setting for prompt template ---
-    const promptTemplate = extension_settings[extensionName]?.promptGuidedContinue ?? '';
+    const promptTemplate = await getPromptValue('promptGuidedContinue', '', {
+        settings: extension_settings[extensionName],
+    });
     let commandParameter = originalInputFromTextarea;
     if (promptTemplate && promptTemplate.includes('{{input}}')) {
-        commandParameter = promptTemplate.replace('{{input}}', originalInputFromTextarea);
+        commandParameter = fillPromptTemplate(promptTemplate, { input: originalInputFromTextarea });
     } else if (promptTemplate) {
         commandParameter = promptTemplate;
     }

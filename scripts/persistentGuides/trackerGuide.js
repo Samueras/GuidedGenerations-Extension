@@ -3,7 +3,7 @@
  * @description Opens a popup for creating and configuring trackers to monitor specific aspects of your story or characters.
  */
 
-import { getContext, extensionName, debugLog } from './guideExports.js'; // Import from central hub
+import { getContext, extensionName, debugLog, getPromptValue } from './guideExports.js'; // Import from central hub
 import { executeTracker } from './trackerLogic.js';
 
 /**
@@ -59,13 +59,15 @@ export default async function trackerGuide() {
 		
 		// Load existing tracker config from chat metadata
 		const existingConfig = context.chatMetadata?.[`${extensionName}_trackers`] || {};
+		const defaultGuidePrompt = await getPromptValue('tracker.guidePrompt', '');
+		const defaultTrackerPrompt = await getPromptValue('tracker.trackerPrompt', '');
 		const trackerConfig = {
 			enabled: existingConfig.enabled || false,
 			messageCount: existingConfig.messageCount || 4,
 			includeTrackerInGuide: existingConfig.includeTrackerInGuide || false,
 			initialFormat: existingConfig.initialFormat || '> Distance {{char}} has moved in meters: 0',
-			guidePrompt: existingConfig.guidePrompt || '[OOC: Answer me out of Character! Don\'t continue the RP. Considering the last message alone, write me how far {{char}} has moved in meter in the last message. Give an exact number of your best estimate.]',
-			trackerPrompt: existingConfig.trackerPrompt || '[OOC: Answer me out of Character! Don\'t continue the RP. Update the Tracker with the Last update without any preamble. Use the follwing format for your output:]\n> Distance {{char}} has moved in meters: X'
+			guidePrompt: existingConfig.guidePrompt || defaultGuidePrompt,
+			trackerPrompt: existingConfig.trackerPrompt || defaultTrackerPrompt
 		};
 		
 		// Create popup using the same structure as edit guides popup
@@ -266,7 +268,9 @@ export default async function trackerGuide() {
 					
 					if (cleanTrackerContent) {
 						// Update the tracker injection with the clean tracker content
-						const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system [Tracker Information ${cleanTrackerContent}]`;
+						const injectionTemplate = await getPromptValue('tracker.trackerInjection', '');
+						const injectionPrompt = injectionTemplate.replaceAll('{{tracker}}', cleanTrackerContent);
+						const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system ${injectionPrompt}`;
 						await context.executeSlashCommandsWithOptions(injectionCommand, { 
 							showOutput: false, 
 							handleExecutionErrors: true 

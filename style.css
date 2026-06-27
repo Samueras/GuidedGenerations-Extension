@@ -319,6 +319,25 @@
     margin-bottom: 15px;
 }
 
+.gg-popup-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gg-popup-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.95em;
+    cursor: pointer;
+    user-select: none;
+}
+
+.gg-popup-checkbox input {
+    margin: 0;
+}
+
 .gg-popup-header h2 {
     margin: 0;
     font-size: 1.5em;
@@ -342,6 +361,12 @@
 
 .gg-popup-section {
     margin-bottom: 15px; /* Space between sections */
+}
+
+.gg-popup-note {
+    font-size: 0.9em;
+    opacity: 0.9;
+    margin-top: 6px;
 }
 
 .gg-popup-section h3 {
@@ -426,6 +451,65 @@
 
 .gg-popup-footer .gg-button {
     min-width: 100px; /* Adjust as needed */
+}
+
+.gg-corrections-popup-content {
+    max-width: 800px;
+}
+
+.gg-corrections-message-wrap {
+    position: relative;
+}
+
+.gg-corrections-message-overlay {
+    position: absolute;
+    inset: 0;
+    padding: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: transparent;
+    background: transparent;
+    pointer-events: none;
+    z-index: 1;
+    font: inherit;
+    overflow: auto;
+    overflow: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.gg-corrections-message-overlay::-webkit-scrollbar {
+    display: none;
+}
+
+.gg-corrections-message {
+    position: relative;
+    z-index: 2;
+    background-color: transparent;
+    padding: 8px;
+    font: inherit;
+}
+
+.gg-corrections-selection {
+    background-color: rgba(255, 215, 0, 0.35);
+}
+
+.gg-corrections-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.gg-corrections-nav-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gg-corrections-info {
+    flex: 1;
+    text-align: center;
+    font-weight: 500;
 }
 
 .gg-button {

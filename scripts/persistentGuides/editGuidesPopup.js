@@ -3,7 +3,7 @@
 /**
  * Edit Guides Popup - Handles UI for editing guide injections.
  */
-import { extension_settings, extensionName, debugLog } from './guideExports.js'; // Import from central hub
+import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './guideExports.js'; // Import from central hub
 
 export class EditGuidesPopup {
     constructor() {
@@ -241,9 +241,39 @@ export class EditGuidesPopup {
 
             const role = extension_settings[extensionName]?.injectionEndRole ?? 'system';
             const context = SillyTavern.getContext();
-            const script = `/gen ${genPrompt} | /inject id=custom_${newName} position=chat scan=true depth=${newDepth} role=${role} [Take into special Consideration: {{pipe}}] | /listinjects |`;
-            
+
             try {
+                const profileValue = extension_settings[extensionName]?.profileCustom ?? '';
+                const presetValue = extension_settings[extensionName]?.presetCustom ?? '';
+                const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
+                let generatedGuide = '';
+
+                if (useDirectCall) {
+                    generatedGuide = await requestCompletion({
+                        profileName: profileValue,
+                        presetName: presetValue,
+                        prompt: genPrompt,
+                        debugLabel: 'editGuides:generate',
+                    });
+                } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
+                    const result = await context.executeSlashCommandsWithOptions(`/gen ${genPrompt}`, {
+                        showOutput: false,
+                        handleExecutionErrors: true,
+                    });
+                    generatedGuide = result?.pipe || '';
+                } else {
+                    console.error('[GuidedGenerations] context.executeSlashCommandsWithOptions not found!');
+                }
+
+                if (!generatedGuide || generatedGuide.trim() === '') {
+                    console.error('[GuidedGenerations] Failed to generate guide content.');
+                    alert('Error during generation. Empty result received.');
+                    return;
+                }
+
+                const injectionTemplate = await getPromptValue('editGuides.generatedGuideInjection', '');
+                const injectionPrompt = fillPromptTemplate(injectionTemplate, { generatedGuide });
+                const script = `/inject id=custom_${newName} position=chat scan=true depth=${newDepth} role=${role} ${injectionPrompt} | /listinjects |`;
                 await context.executeSlashCommandsWithOptions(script, { showOutput: false });
                 this.close();
             } catch (err) {

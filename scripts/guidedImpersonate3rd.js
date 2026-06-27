@@ -1,5 +1,5 @@
 // scripts/guidedImpersonate3rd.js
-import { getContext, extension_settings, extensionName, debugLog, handleSwitching, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const guidedImpersonate3rd = async () => {
     const textarea = document.getElementById('send_textarea');
@@ -20,21 +20,7 @@ const guidedImpersonate3rd = async () => {
     // --- If not restoring, proceed with impersonation ---
     setPreviousImpersonateInput(currentInputText); // Use setter
 
-    // Capture the original profile BEFORE any switching happens
-    const context = getContext();
-    let originalProfile = '';
-    if (context && typeof context.executeSlashCommandsWithOptions === 'function') {
-        try {
-            // Get current profile before any switching
-            const { getCurrentProfile } = await import('./persistentGuides/guideExports.js');
-            originalProfile = await getCurrentProfile();
-            debugLog(`[Impersonate-3rd] Captured original profile before switching: "${originalProfile}"`);
-        } catch (error) {
-            debugLog(`[Impersonate-3rd] Could not get original profile:`, error);
-        }
-    }
-
-    // Handle profile and preset switching using unified utility
+    // Resolve target profile and preset from settings
     const profileKey = 'profileImpersonate3rd';
     const presetKey = 'presetImpersonate3rd';
     const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
@@ -49,53 +35,45 @@ const guidedImpersonate3rd = async () => {
     
     debugLog(`[Impersonate-3rd] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
     
-    const { switch: switchProfileAndPreset, restore } = await handleSwitching(profileValue, presetValue, originalProfile);
-
     // Use user-defined impersonate prompt override
-    const promptTemplate = extension_settings[extensionName]?.promptImpersonate3rd ?? '';
-    const filledPrompt = promptTemplate.replace('{{input}}', currentInputText);
-
-    // Build STScript without preset switching
-    const stscriptCommand = `/impersonate await=true ${filledPrompt} |`;
-    const fullScript = `// Impersonate guide|\n${stscriptCommand}`;
+    const promptTemplate = await getPromptValue('promptImpersonate3rd', '', {
+        settings: extension_settings[extensionName],
+    });
+    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
 
     try {
-        const context = getContext();
-        if (typeof context.executeSlashCommandsWithOptions === 'function') {
-            debugLog('[Impersonate-3rd] About to switch profile and preset...');
-            
-            // Switch profile and preset before executing
-            await switchProfileAndPreset();
-            
-            debugLog('[Impersonate-3rd] Profile and preset switch complete, about to execute STScript...');
-            
-            // Execute the command and wait for it to complete
-            await context.executeSlashCommandsWithOptions(fullScript); 
-            
-            debugLog('[Impersonate-3rd] STScript execution complete, about to restore profile...');
-            
-            // After completion, read the new input and store it using the setter
-            setLastImpersonateResult(textarea.value);
-            debugLog('[Impersonate-3rd] STScript executed, new input stored in shared state.');
+        const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
+        if (useDirectCall) {
+            debugLog('[Impersonate-3rd] Requesting direct completion...');
+            const completion = await requestCompletion({
+                profileName: profileValue,
+                presetName: presetValue,
+                prompt: filledPrompt,
+                debugLabel: 'impersonate:3rd',
+            });
 
-            // After completion, restore original profile and preset using utility restore function
-            await restore();
-            
-            debugLog('[Impersonate-3rd] Profile restore complete');
-
+            if (completion && completion.trim() !== '') {
+                textarea.value = completion;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                setLastImpersonateResult(completion);
+                debugLog('[Impersonate-3rd] Completion received and stored.');
+            } else {
+                debugLog('[Impersonate-3rd] Completion empty, input unchanged.');
+            }
         } else {
-            console.error('[GuidedGenerations] context.executeSlashCommandsWithOptions not found!');
+            const context = SillyTavern.getContext();
+            if (typeof context.executeSlashCommandsWithOptions === 'function') {
+                const stscriptCommand = `/impersonate await=true ${filledPrompt} |`;
+                await context.executeSlashCommandsWithOptions(stscriptCommand);
+                setLastImpersonateResult(textarea.value);
+                debugLog('[Impersonate-3rd] Slash command completed, input stored.');
+            } else {
+                console.error('[GuidedGenerations] context.executeSlashCommandsWithOptions not found!');
+            }
         }
     } catch (error) {
-        console.error(`[GuidedGenerations] Error executing Guided Impersonate (3rd) stscript: ${error}`);
+        console.error(`[GuidedGenerations] Error executing Guided Impersonate (3rd): ${error}`);
         setLastImpersonateResult(''); // Use setter to clear shared state on error
-        
-        debugLog('[Impersonate-3rd] Error occurred, about to restore profile...');
-        
-        // Restore original profile and preset on error
-        await restore();
-        
-        debugLog('[Impersonate-3rd] Profile restore complete after error');
     }
 };
 

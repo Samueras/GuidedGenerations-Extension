@@ -8,6 +8,6 @@
     "css": "style.css",
     "author": "Samueras",
     "description": "Adds various buttons to guide AI generation within SillyTavern, enhancing control over character portrayal, actions, and narrative flow.",
-    "version": "1.6.6",
+    "version": "1.7.0",
     "manifest_version": 3
 }

@@ -5,7 +5,7 @@
 
 // External dependencies (SillyTavern)
 import { getContext, extension_settings, renderExtensionTemplateAsync } from '../../../../../extensions.js';
-import { chat, eventSource, event_types, saveChatConditional, addOneMessage } from '../../../../../../script.js';
+import { chat, eventSource, event_types, saveChatConditional, addOneMessage, deactivateSendButtons, activateSendButtons, setExternalAbortController, setSendButtonState } from '../../../../../../script.js';
 
 // Core extension constants and functions (defined locally to avoid circular dependency)
 const extensionName = "GuidedGenerations-Extension";
@@ -27,9 +27,49 @@ function debugWarn(...args) {
 // Shared state functions for impersonate input management
 let previousImpersonateInput = '';
 let lastImpersonateResult = '';
+const RECOVERABLE_INPUT_HISTORY_LIMIT = 10;
+let recoverableInputHistory = [];
+let recoverableInputCycleIndex = 0;
+
+function addRecoverableInput(input) {
+    const normalizedInput = typeof input === 'string' ? input : '';
+    if (!normalizedInput) return;
+
+    // Avoid consecutive duplicates while preserving older history entries.
+    if (recoverableInputHistory[0] === normalizedInput) {
+        recoverableInputCycleIndex = 0;
+        return;
+    }
+
+    recoverableInputHistory.unshift(normalizedInput);
+    if (recoverableInputHistory.length > RECOVERABLE_INPUT_HISTORY_LIMIT) {
+        recoverableInputHistory = recoverableInputHistory.slice(0, RECOVERABLE_INPUT_HISTORY_LIMIT);
+    }
+    recoverableInputCycleIndex = 0;
+}
+
+function getNextRecoverableInput(currentInput = '') {
+    if (!recoverableInputHistory.length) return '';
+
+    const normalizedCurrentInput = typeof currentInput === 'string' ? currentInput : '';
+    const historyLength = recoverableInputHistory.length;
+
+    for (let offset = 0; offset < historyLength; offset++) {
+        const idx = (recoverableInputCycleIndex + offset) % historyLength;
+        const candidate = recoverableInputHistory[idx];
+        if (candidate !== normalizedCurrentInput) {
+            recoverableInputCycleIndex = (idx + 1) % historyLength;
+            return candidate;
+        }
+    }
+
+    // All entries match current input (or history is degenerate); keep state stable.
+    return '';
+}
 
 function setPreviousImpersonateInput(input) {
     previousImpersonateInput = input;
+    addRecoverableInput(input);
 }
 
 function getPreviousImpersonateInput() {
@@ -38,6 +78,7 @@ function getPreviousImpersonateInput() {
 
 function setLastImpersonateResult(result) {
     lastImpersonateResult = result;
+    addRecoverableInput(result);
 }
 
 function getLastImpersonateResult() {
@@ -48,6 +89,16 @@ function getLastImpersonateResult() {
 function isGroupChat() {
     const context = getContext();
     return context && context.groupId && context.groups;
+}
+
+// Optional prompt manager helpers (SillyTavern openai.js)
+async function getOpenAIPromptManagerHelpers() {
+    try {
+        return await import('../../../../../../scripts/openai.js');
+    } catch (error) {
+        debugWarn(`[${extensionName}] Failed to load openai prompt manager helpers:`, error);
+        return null;
+    }
 }
 
 // Settings management functions - imported from index.js
@@ -79,7 +130,9 @@ const defaultSettings = {
 };
 
 // Utility functions
-import { handleSwitching, getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, switchToProfile, switchToPreset, withProfile, getConnectApiMap, initializeEventListeners, extractApiIdFromApiType } from '../utils/presetUtils.js';
+import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType } from '../utils/presetUtils.js';
+import { requestCompletion, shouldUseDirectCall } from '../utils/llmClient.js';
+import { getPromptObject, getPromptValue, fillPromptTemplate, loadPromptCatalog } from '../utils/promptManager.js';
 
 // Guide functions
 import situationalGuide from './situationalGuide.js';
@@ -103,6 +156,7 @@ import { corrections } from '../tools/corrections.js';
 import { spellchecker } from '../tools/spellchecker.js';
 import editIntros from '../tools/editIntros.js';
 import clearInput from '../tools/clearInput.js';
+import separatedThinking from '../tools/separatedThinking.js';
 
 // Main script functions
 import { guidedSwipe, generateNewSwipe } from '../guidedSwipe.js';
@@ -131,20 +185,25 @@ export {
     event_types,
     saveChatConditional,
     addOneMessage,
+    deactivateSendButtons,
+    activateSendButtons,
+    setExternalAbortController,
+    setSendButtonState,
     renderExtensionTemplateAsync,
     
     // Utility functions
-    handleSwitching,
     getProfileApiType,
     getPresetsForApiType,
     getCurrentProfile,
     getProfileList,
-    switchToProfile,
-    switchToPreset,
-    withProfile,
     getConnectApiMap,
-    initializeEventListeners,
     extractApiIdFromApiType,
+    requestCompletion,
+    shouldUseDirectCall,
+    getPromptObject,
+    getPromptValue,
+    fillPromptTemplate,
+    loadPromptCatalog,
     
     // Guides
     runGuideScript,
@@ -169,6 +228,7 @@ export {
     clearInput,
     corrections,
     editIntros,
+    separatedThinking,
     spellchecker,
     
     // Main script functions
@@ -195,6 +255,8 @@ export {
     isGroupChat,
     setPreviousImpersonateInput,
     getPreviousImpersonateInput,
+    addRecoverableInput,
+    getNextRecoverableInput,
     setLastImpersonateResult,
     getLastImpersonateResult,
     
@@ -202,4 +264,5 @@ export {
     getDebugMessages,
     clearDebugMessages,
     getDebugMessagesAsText,
+    getOpenAIPromptManagerHelpers,
 };

@@ -3,7 +3,7 @@
  * @description Handles the automatic execution of trackers based on chat metadata configuration.
  */
 
-import { getContext, extensionName, debugLog, handleSwitching } from './guideExports.js'; // Import from central hub
+import { getContext, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './guideExports.js'; // Import from central hub
 
 /**
  * Executes the tracker logic automatically when triggered
@@ -44,23 +44,8 @@ export async function executeTracker(isAuto = false, force = false) {
         debugLog('Debug - context.extensionSettings exists:', !!context.extensionSettings);
         debugLog('Debug - extensionSettings[extensionName]:', globalSettings);
         
-        let presetHandler = null;
-        // Check for tracker profiles and presets - use presetTrackerDetermine and profileTrackerDetermine for the first call
         const trackerDetermineProfile = globalSettings?.profileTrackerDetermine;
         const trackerDeterminePreset = globalSettings?.presetTrackerDetermine;
-        if (trackerDetermineProfile || trackerDeterminePreset) {
-            debugLog('Switching to tracker determine profile:', trackerDetermineProfile, 'preset:', trackerDeterminePreset);
-            try {
-                presetHandler = await handleSwitching(trackerDetermineProfile || null, trackerDeterminePreset || null);
-                const { switch: switchPreset, restore } = presetHandler;
-                await switchPreset();
-                debugLog('Successfully switched to tracker determine profile/preset');
-            } catch (error) {
-                debugLog('Error switching to tracker determine profile/preset:', error);
-            }
-        } else {
-            debugLog('No profile or preset to switch to - profileTrackerDetermine:', globalSettings?.profileTrackerDetermine, 'presetTrackerDetermine:', globalSettings?.presetTrackerDetermine);
-        }
 
         // Step 1: Generate guide content using the first prompt
         let guidePrompt = trackerConfig.guidePrompt;
@@ -89,17 +74,28 @@ export async function executeTracker(isAuto = false, force = false) {
             }
         }
         
-        const guideResult = await context.executeSlashCommandsWithOptions(
-            `/gen ${guidePrompt}`,
-            { showOutput: false, handleExecutionErrors: true }
-        );
+        let guideContent = '';
+        const useDetermineDirect = await shouldUseDirectCall(trackerDetermineProfile, trackerDeterminePreset);
+        if (useDetermineDirect) {
+            guideContent = await requestCompletion({
+                profileName: trackerDetermineProfile,
+                presetName: trackerDeterminePreset,
+                prompt: guidePrompt,
+                debugLabel: 'tracker:determine',
+                includeIdentityContext: false,
+            });
+        } else {
+            const guideResult = await context.executeSlashCommandsWithOptions(
+                `/gen ${guidePrompt}`,
+                { showOutput: false, handleExecutionErrors: true }
+            );
+            guideContent = guideResult?.pipe || '';
+        }
 
-        if (!guideResult || !guideResult.pipe) {
+        if (!guideContent || guideContent.trim() === '') {
             console.error('[GuidedGenerations] Failed to generate guide content');
             return;
         }
-
-        const guideContent = guideResult.pipe;
         debugLog('Generated guide content:', guideContent);
 
         // Half second delay between the two tracker calls
@@ -107,22 +103,8 @@ export async function executeTracker(isAuto = false, force = false) {
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Switch to tracker update profile and preset for the second call
-        let updatePresetHandler = null;
         const trackerUpdateProfile = globalSettings?.profileTrackerUpdate;
         const trackerUpdatePreset = globalSettings?.presetTrackerUpdate;
-        if (trackerUpdateProfile || trackerUpdatePreset) {
-            debugLog('Switching to tracker update profile:', trackerUpdateProfile, 'preset:', trackerUpdatePreset);
-            try {
-                updatePresetHandler = await handleSwitching(trackerUpdateProfile || null, trackerUpdatePreset || null);
-                const { switch: switchPreset, restore } = updatePresetHandler;
-                await switchPreset();
-                debugLog('Successfully switched to tracker update profile/preset');
-            } catch (error) {
-                debugLog('Error switching to tracker update profile/preset:', error);
-            }
-        } else {
-            debugLog('No profile or preset to switch to - profileTrackerUpdate:', globalSettings?.profileTrackerUpdate, 'presetTrackerUpdate:', globalSettings?.presetTrackerUpdate);
-        }
 
         // Step 2: Get current tracker content to include in context
         let currentTrackerContent = '';
@@ -145,18 +127,30 @@ export async function executeTracker(isAuto = false, force = false) {
         // Step 2: Generate tracker update using /genraw with the guide content and current tracker as contex
         const trackerPrompt = `${trackerConfig.trackerPrompt}\n\nLast Update:\n${guideContent}\n\nTracker:\n${currentTrackerContent}`;
         
-        const trackerResult = await context.executeSlashCommandsWithOptions(
-            `/genraw ${trackerPrompt}`,
-            { showOutput: false, handleExecutionErrors: true }
-        );
-
-        if (!trackerResult || !trackerResult.pipe) {
-            console.error('[GuidedGenerations] Failed to generate tracker update');
-            console.error('[GuidedGenerations] trackerResult:', trackerResult);
-            return;
+        let trackerUpdate = '';
+        const useUpdateDirect = await shouldUseDirectCall(trackerUpdateProfile, trackerUpdatePreset);
+        if (useUpdateDirect) {
+            trackerUpdate = await requestCompletion({
+                profileName: trackerUpdateProfile,
+                presetName: trackerUpdatePreset,
+                prompt: trackerPrompt,
+                debugLabel: 'tracker:update',
+                includeChatHistory: false,
+                includeIdentityContext: false,
+            });
+        } else {
+            const trackerResult = await context.executeSlashCommandsWithOptions(
+                `/genraw ${trackerPrompt}`,
+                { showOutput: false, handleExecutionErrors: true }
+            );
+            trackerUpdate = trackerResult?.pipe || '';
         }
 
-        const trackerUpdate = trackerResult.pipe;
+        if (!trackerUpdate || trackerUpdate.trim() === '') {
+            console.error('[GuidedGenerations] Failed to generate tracker update');
+            console.error('[GuidedGenerations] trackerUpdate:', trackerUpdate);
+            return;
+        }
         debugLog('Generated tracker update:', trackerUpdate);
         debugLog('Tracker update length:', trackerUpdate?.length || 0);
         debugLog('Tracker update type:', typeof trackerUpdate);
@@ -167,7 +161,9 @@ export async function executeTracker(isAuto = false, force = false) {
 
         // Step 3: Update the tracker injection
         if (trackerUpdate && trackerUpdate.trim()) {
-            const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system [Tracker Information ${trackerUpdate}]`;
+            const injectionTemplate = await getPromptValue('tracker.trackerInjection', '');
+            const injectionPrompt = fillPromptTemplate(injectionTemplate, { tracker: trackerUpdate });
+            const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system ${injectionPrompt}`;
             await context.executeSlashCommandsWithOptions(injectionCommand, { 
                 showOutput: false, 
                 handleExecutionErrors: true 
@@ -181,38 +177,7 @@ export async function executeTracker(isAuto = false, force = false) {
         // Try using the standard comment command first, then fall back to custom creation
         await createTrackerNote(trackerUpdate, 'Stat Tracker', 'stattracker', guideContent);
 
-        // Restore the original presets if we switched to tracker presets
-        if (updatePresetHandler) {
-            debugLog('Restoring original preset from tracker update...');
-            try {
-                const { restore } = updatePresetHandler;
-                await restore();
-                debugLog('Successfully restored original preset from tracker update');
-                
-                // Add additional safety delay after restoration to ensure profile switching is completely settled
-                debugLog('Waiting additional 500ms after tracker update restoration to ensure profile stability...');
-                await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (error) {
-                console.error('[GuidedGenerations] Error restoring original preset from tracker update:', error);
-            }
-        }
-        
-        if (presetHandler) {
-            debugLog('Restoring original preset from tracker determine...');
-            try {
-                const { restore } = presetHandler;
-                await restore();
-                debugLog('Successfully restored original preset from tracker determine');
-                
-                // Add additional safety delay after restoration to ensure profile switching is completely settled
-                debugLog('Waiting additional 500ms after tracker determine restoration to ensure profile stability...');
-                await new Promise(resolve => setTimeout(resolve, 500));
-            } catch (error) {
-                console.error('[GuidedGenerations] Error restoring original preset from tracker determine:', error);
-            }
-        }
-
-        debugLog('Tracker execution completed successfully - all profile restorations finished');
+        debugLog('Tracker execution completed successfully');
 
     } catch (error) {
         console.error('[GuidedGenerations] Error executing tracker:', error);

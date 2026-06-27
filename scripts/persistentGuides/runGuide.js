@@ -1,4 +1,4 @@
-import { getContext, extension_settings, extensionName, handleSwitching, debugLog, createTrackerNote } from './guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, debugLog, createTrackerNote, requestCompletion, shouldUseDirectCall, getPromptValue } from './guideExports.js'; // Import from central hub
 
 /**
  * Generic runner for Persistent Guides STScript commands.
@@ -16,7 +16,7 @@ import { getContext, extension_settings, extensionName, handleSwitching, debugLo
  */
 export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '', finalCommand = '', isAuto = false, previousInjectionAction = 'none', raw = false, skipSituationalTracker = false }) {
     // ENHANCED DEBUGGING: Track when runGuideScript is called
-    console.log(`[AUTOTRIGGER-DEBUG] runGuideScript called with:`, {
+    debugLog(`[AUTOTRIGGER-DEBUG] runGuideScript called with:`, {
         guideId: guideId,
         isAuto: isAuto,
         timestamp: new Date().toISOString(),
@@ -34,13 +34,10 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     const presetValue = rawPreset.trim().replace(/\|/g, ''); // Remove pipe characters to prevent STScript injection
     const profileValue = rawProfile.trim();
 
-    // Get the switch and restore functions from the utility
-    const presetHandler = await handleSwitching(profileValue || null, presetValue || null);
-    const { switch: switchPreset, restore } = presetHandler;
-
     // Handle previous injection based on action
     let initCmd = '';
     if (previousInjectionAction === 'move') {
+        const movedInjectionPrompt = await getPromptValue('persistentGuides.movedPreviousInjection', '');
         initCmd = `// Read existing injection|
 /listinjects return=object |
 /let injections {{pipe}} |
@@ -48,17 +45,12 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
 /var index=${guideId} x |
 /let y {{pipe}} |
 /var index=value y |
-/inject id=${guideId} position=chat scan=true depth=4 [Relevant Informations for portraying characters {{pipe}}] |`;
+/inject id=${guideId} position=chat scan=true depth=4 ${movedInjectionPrompt} |`;
     } else if (previousInjectionAction === 'flush') {
         initCmd = `/flushinject ${guideId} |`;
     }
 
     // First: Execute the guide generation alone to capture the output
-    const asClause = genAs ? `${genAs} ` : '';
-    // Generate guide content: use raw command if requested
-    const genLine = raw ? `${genCommandSuffix} |` : `/gen ${asClause}${genCommandSuffix} |`;
-    const genScript = `${initCmd ? initCmd + '\n' : ''}${genLine}`;
-    
     // Second: Build injection script that will use the captured content
     let injectionScript = finalCommand;
 
@@ -69,33 +61,52 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
         injectionScript += ' |';
     }
 
-    // Switch to the target profile/preset before executing the script
-    if (profileValue || presetValue) {
-        // Wait for profile/preset switching to complete using the utility function
-        if (profileValue && presetValue) {
-            debugLog(`${extensionName}: Switching to profile "${profileValue}" and preset "${presetValue}" and waiting for completion...`);
-        } else if (profileValue) {
-            debugLog(`${extensionName}: Switching to profile "${profileValue}" and waiting for completion...`);
-        } else if (presetValue) {
-            debugLog(`${extensionName}: Switching to preset "${presetValue}" and waiting for completion...`);
-        }
-        await switchPreset();
-        debugLog(`${extensionName}: Profile/preset switch completed successfully`);
-    }
-
     // Execute STScript via SillyTavern context
     const context = getContext();
     if (context && typeof context.executeSlashCommandsWithOptions === 'function') {
         try {
-            // Step 1: Execute guide generation to capture the output
-            debugLog(`[${extensionName}] Executing guide generation script...`);
-            const genResult = await context.executeSlashCommandsWithOptions(genScript, {
-                showOutput: false,
-                handleExecutionErrors: true
-            });
-            
-            // Capture the guide output
-            const capturedGuideOutput = genResult?.pipe || '';
+            // Step 0: Run any injection cleanup/move commands before generation
+            if (initCmd) {
+                debugLog(`[${extensionName}] Executing pre-generation injection script...`);
+                await context.executeSlashCommandsWithOptions(initCmd, {
+                    showOutput: false,
+                    handleExecutionErrors: true
+                });
+            }
+
+            // Step 1: Execute guide generation (direct call or default slash command)
+            debugLog(`[${extensionName}] Executing guide generation request...`);
+
+            const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
+            let capturedGuideOutput = '';
+
+            if (useDirectCall) {
+                let prompt = genCommandSuffix;
+                if (raw && typeof prompt === 'string') {
+                    const trimmed = prompt.trim();
+                    if (trimmed.startsWith('/genraw ')) {
+                        prompt = trimmed.replace(/^\/genraw\s+/i, '');
+                    } else if (trimmed.startsWith('/gen ')) {
+                        prompt = trimmed.replace(/^\/gen\s+/i, '');
+                    }
+                }
+
+                capturedGuideOutput = await requestCompletion({
+                    profileName: profileValue,
+                    presetName: presetValue,
+                    prompt,
+                    debugLabel: `runGuide:${guideId}`,
+                    includeChatHistory: !raw,
+                });
+            } else {
+                const asClause = genAs ? `${genAs} ` : '';
+                const genLine = raw ? `${genCommandSuffix} |` : `/gen ${asClause}${genCommandSuffix} |`;
+                const genResult = await context.executeSlashCommandsWithOptions(genLine, {
+                    showOutput: false,
+                    handleExecutionErrors: true,
+                });
+                capturedGuideOutput = genResult?.pipe || '';
+            }
             debugLog(`[${extensionName}] Captured guide output length: ${capturedGuideOutput?.length || 0}`);
             
             // Step 2: Execute injection script using the captured content
@@ -193,20 +204,9 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
         } catch (err) {
             console.error(`${extensionName}: Error executing guide script for ${guideId}:`, err);
             return null;
-        } finally {
-            // Always restore the original profile/preset and wait for completion
-            if (profileValue || presetValue) {
-                debugLog(`${extensionName}: Restoring original profile/preset...`);
-                await restore();
-                debugLog(`${extensionName}: Profile/preset restore completed`);
-            }
         }
     } else {
         console.error(`${extensionName}: Context unavailable to execute guide script for ${guideId}.`);
-        // Also restore if context is not available
-        if (profileValue || presetValue) {
-            await restore();
-        }
         return null;
     }
 }

@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Rules Guide option in the Persistent Guides menu.
  */
-import { extensionName, extension_settings } from './guideExports.js'; // Import from central hub
+import { extensionName, extension_settings, getPromptValue } from './guideExports.js'; // Import from central hub
 import { runGuideScript } from './runGuide.js';
 
 /**
@@ -11,11 +11,13 @@ import { runGuideScript } from './runGuide.js';
 const rulesGuide = async (isAuto = false) => {
     const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
     // Use user-defined prompt override for Rules Guide
-    const promptTemplate = extension_settings[extensionName]?.promptRules ?? `[Create a list of explicit rules that {{char}} has learned and follows from the story and their character description. Only include rules that have been explicitly established in the chat history or character information. Format as a numbered list.] `;
+    const promptTemplate = await getPromptValue('promptRules', '', {
+        settings: extension_settings[extensionName],
+    });
     const genCommandSuffix = promptTemplate;
-    const label = `Character's rules: {{pipe}}`;
     const depth = extension_settings[extensionName]?.depthPromptRules ?? 0;
-    const finalCommand = `/inject id=rules position=chat scan=true depth=${depth} role=${injectionRole} [Rules for current scene {{pipe}}] |`;
+    const injectionPrompt = await getPromptValue('persistentGuides.rulesInjection', '');
+    const finalCommand = `/inject id=rules position=chat scan=true depth=${depth} role=${injectionRole} ${injectionPrompt} |`;
     return await runGuideScript({
         guideId: 'rules',
         genCommandSuffix,

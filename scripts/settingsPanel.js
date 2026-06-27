@@ -2,6 +2,96 @@
 
 import { extensionName, loadSettings, updateSettingsUI, addSettingsEventListeners, defaultSettings, debugLog, debugWarn, renderExtensionTemplateAsync, debugProfileSystem } from './persistentGuides/guideExports.js'; // Import from central hub
 
+const DEFAULT_PROMPTS_URL = 'https://raw.githubusercontent.com/Samueras/GuidedGenerations-Extension/develop/prompts.json';
+const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
+const PROMPT_SETTING_KEYS = [
+    'promptClothes',
+    'promptState',
+    'promptThinking',
+    'promptSituational',
+    'promptRules',
+    'promptCorrections',
+    'promptSeparatedThinking',
+    'promptSpellchecker',
+    'promptImpersonate1st',
+    'promptImpersonate2nd',
+    'promptImpersonate3rd',
+    'promptGuidedResponse',
+    'promptGuidedSwipe',
+    'promptGuidedContinue',
+    'customAutoGuidePrompt',
+];
+
+function getPromptOverrideSettingKey(promptKey) {
+    return `use${promptKey.charAt(0).toUpperCase()}${promptKey.slice(1)}SettingOverride`;
+}
+
+async function downloadDefaultPromptsFile(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    try {
+        const response = await fetch(DEFAULT_PROMPTS_URL, { cache: 'no-cache' });
+        if (!response.ok) {
+            throw new Error(`GitHub returned ${response.status}`);
+        }
+
+        const text = await response.text();
+        JSON.parse(text);
+
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'prompts.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error(`[${extensionName}] Failed to download default prompts.json:`, error);
+        alert(`Could not download default prompts.json: ${error.message || error}`);
+    }
+}
+
+function setupPromptOverrideToggles(container) {
+    for (const promptKey of PROMPT_SETTING_KEYS) {
+        const textarea = container.querySelector(`#gg_${promptKey}`);
+        if (!textarea) continue;
+
+        const overrideKey = getPromptOverrideSettingKey(promptKey);
+        if (container.querySelector(`#gg_${overrideKey}`)) continue;
+
+        const wrapper = document.createElement('label');
+        wrapper.style.display = 'inline-flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '4px';
+        wrapper.style.marginTop = '4px';
+        wrapper.style.marginLeft = '8px';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `gg_${overrideKey}`;
+        checkbox.name = overrideKey;
+        checkbox.className = 'gg-setting-input';
+
+        wrapper.appendChild(checkbox);
+        wrapper.append('Use settings override');
+
+        textarea.insertAdjacentElement('afterend', wrapper);
+
+        // Live-tick the override checkbox as the user edits the prompt.
+        // The persisted change itself is handled by the delegated `change`
+        // listener in index.js; this only keeps the checkbox visual in sync
+        // while typing, before blur fires.
+        textarea.addEventListener('input', () => {
+            if (!checkbox.checked) {
+                checkbox.checked = true;
+            }
+        });
+    }
+}
+
 /**
  * Loads and renders the settings HTML for the extension.
  */
@@ -35,17 +125,9 @@ export async function loadSettingsPanel() {
 
             setTimeout(async () => {
                 loadSettings();
+                setupPromptOverrideToggles(container);
                 updateSettingsUI();
                 addSettingsEventListeners();
-
-                // Initialize event listeners for profile and preset switching
-                try {
-                    const { initializeEventListeners } = await import('./persistentGuides/guideExports.js');
-                    initializeEventListeners();
-                    debugLog(`[${extensionName}] Event listeners initialized for profile/preset switching in settings panel`);
-                } catch (error) {
-                    debugWarn(`[${extensionName}] Could not initialize event listeners in settings panel:`, error);
-                }
 
                 // Setup preset and clear buttons with native event handlers
                 const presetButtons = container.querySelectorAll('.gg-preset-button');
@@ -70,7 +152,7 @@ export async function loadSettingsPanel() {
                         const key = btn.getAttribute('data-target');
                         const input = document.getElementById(`gg_${key}`);
                         if (input) {
-                            input.value = 'GGSytemPrompt';
+                            input.value = INTERNAL_HELPER_PRESET_VALUE;
                             input.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     });
@@ -102,6 +184,11 @@ export async function loadSettingsPanel() {
                     });
                 });
 
+                const downloadDefaultPromptsButton = container.querySelector('#ggDownloadDefaultPrompts');
+                if (downloadDefaultPromptsButton) {
+                    downloadDefaultPromptsButton.addEventListener('click', downloadDefaultPromptsFile);
+                }
+
                 // Setup debug profile system button
                 const debugButton = container.querySelector('#debugProfileSystem');
                 if (debugButton) {
@@ -123,6 +210,34 @@ export async function loadSettingsPanel() {
                             await updateSettingsUI();
                         } catch (error) {
                             console.error(`[${extensionName}] Error refreshing profile dropdowns:`, error);
+                        }
+                    });
+                }
+
+                // Setup "Set Defaults" button: applies the GG Internal Helper Preset
+                // to every eligible guide/tool preset dropdown, leaving profiles as-is.
+                const setDefaultsButton = container.querySelector('#gg_setDefaultPresets');
+                if (setDefaultsButton) {
+                    setDefaultsButton.addEventListener('click', () => {
+                        const ELIGIBLE = [
+                            'presetClothes', 'presetState', 'presetThinking', 'presetSituational',
+                            'presetRules', 'presetCustom', 'presetCustomAuto', 'presetCorrections',
+                            'presetSeparatedThinking', 'presetSpellchecker',
+                            'presetTrackerDetermine', 'presetTrackerUpdate',
+                        ];
+                        let applied = 0;
+                        ELIGIBLE.forEach((id) => {
+                            const select = container.querySelector(`#${id}`);
+                            if (select) {
+                                select.value = INTERNAL_HELPER_PRESET_VALUE;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                                applied += 1;
+                            }
+                        });
+                        const statusEl = container.querySelector('#profileDebugStatus');
+                        if (statusEl) {
+                            statusEl.textContent = `✓ Applied helper preset to ${applied} guides/tools.`;
+                            statusEl.style.color = 'green';
                         }
                     });
                 }
