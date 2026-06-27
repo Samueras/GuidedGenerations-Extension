@@ -170,6 +170,9 @@ class CorrectionsPopup {
             messageTextarea.addEventListener('select', recordSelection);
             messageTextarea.addEventListener('blur', recordSelection);
             messageTextarea.addEventListener('focus', () => this.restoreSelection(messageTextarea));
+            // Keep the highlight overlay aligned with the textarea's viewport.
+            const syncOverlayScroll = () => this.syncOverlayScroll(messageTextarea);
+            messageTextarea.addEventListener('scroll', syncOverlayScroll, { passive: true });
         }
     }
 
@@ -313,13 +316,23 @@ class CorrectionsPopup {
         const { start, end, hasSelection } = this.resolveSelection(text, textarea);
         if (!hasSelection) {
             overlay.innerHTML = escapeHtml(text || '');
-            return;
+        } else {
+            const before = escapeHtml(text.slice(0, start));
+            const selected = escapeHtml(text.slice(start, end));
+            const after = escapeHtml(text.slice(end));
+            overlay.innerHTML = `${before}<span class="gg-corrections-selection">${selected}</span>${after}`;
         }
 
-        const before = escapeHtml(text.slice(0, start));
-        const selected = escapeHtml(text.slice(start, end));
-        const after = escapeHtml(text.slice(end));
-        overlay.innerHTML = `${before}<span class="gg-corrections-selection">${selected}</span>${after}`;
+        this.syncOverlayScroll(textarea);
+    }
+
+    syncOverlayScroll(textarea) {
+        const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
+        if (!overlay) return;
+        if (textarea && typeof textarea.scrollTop === 'number') {
+            overlay.scrollTop = textarea.scrollTop;
+            overlay.scrollLeft = textarea.scrollLeft;
+        }
     }
 
     updateSelectionIndicator() {

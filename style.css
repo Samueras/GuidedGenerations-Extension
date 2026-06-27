@@ -472,6 +472,14 @@
     pointer-events: none;
     z-index: 1;
     font: inherit;
+    overflow: auto;
+    overflow: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.gg-corrections-message-overlay::-webkit-scrollbar {
+    display: none;
 }
 
 .gg-corrections-message {
