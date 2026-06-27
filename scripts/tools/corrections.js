@@ -11,7 +11,10 @@ import {
     getProfileApiType,
     extractApiIdFromApiType,
     getPromptValue,
-    fillPromptTemplate
+    fillPromptTemplate,
+    deactivateSendButtons,
+    activateSendButtons,
+    setSendButtonState,
 } from '../persistentGuides/guideExports.js';
 
 let lastCorrectionInstruction = '';
@@ -437,23 +440,38 @@ class CorrectionsPopup {
             const useDirectCall = await shouldUseDirectCall(profileValue, targetPreset);
             let correctedText = '';
 
-            if (useDirectCall) {
-                correctedText = await requestCompletion({
-                    profileName: profileValue,
-                    presetName: targetPreset,
-                    prompt: promptForModel,
-                    debugLabel: 'corrections',
-                    includeChatHistory: this.includeChatHistory,
+            // Close the popup and lock the send button so the user sees that
+            // a generation is in progress (matching spellchecker/requestCompletion behavior).
+            this.close();
+            setSendButtonState?.(true);
+            deactivateSendButtons?.();
+
+            try {
+                if (useDirectCall) {
+                    correctedText = await requestCompletion({
+                        profileName: profileValue,
+                        presetName: targetPreset,
+                        prompt: promptForModel,
+                        debugLabel: 'corrections',
+                        includeChatHistory: this.includeChatHistory,
+                    });
+                } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
+                    const command = this.includeChatHistory ? '/gen' : '/genraw';
+                    const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {
+                        showOutput: false,
+                        handleExecutionErrors: true,
+                    });
+                    correctedText = result?.pipe || '';
+                } else {
+                    console.error('[GuidedGenerations][Corrections] context.executeSlashCommandsWithOptions not found.');
+                }
+            } finally {
+                activateSendButtons?.();
+                setSendButtonState?.(false);
+                requestAnimationFrame(() => {
+                    activateSendButtons?.();
+                    setSendButtonState?.(false);
                 });
-            } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                const command = this.includeChatHistory ? '/gen' : '/genraw';
-                const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {
-                    showOutput: false,
-                    handleExecutionErrors: true,
-                });
-                correctedText = result?.pipe || '';
-            } else {
-                console.error('[GuidedGenerations][Corrections] context.executeSlashCommandsWithOptions not found.');
             }
 
             if (!correctedText || correctedText.trim() === '') {
@@ -466,7 +484,6 @@ class CorrectionsPopup {
                 : correctedText;
 
             await applyCorrectionSwipe(context, this.messageIndex, updatedMessage);
-            this.close();
         } catch (error) {
             console.error('[GuidedGenerations][Corrections] Error during Corrections apply:', error);
             alert(`Corrections Tool Error: ${error.message || 'An unexpected error occurred.'}`);
@@ -527,6 +544,17 @@ async function applyCorrectionSwipe(context, messageIndex, correctedText) {
 
     if (context.eventSource && context.event_types) {
         context.eventSource.emit(context.event_types.MESSAGE_SWIPED, messageIndex);
+    }
+
+    // Refresh swipe UI (chevrons) so the user can navigate between the
+    // original and the new correction swipe. Without this, the back-chevron
+    // may not appear when correcting the first pass of a message.
+    try {
+        if (context?.swipe?.refresh && typeof context.swipe.refresh === 'function') {
+            context.swipe.refresh(true, false);
+        }
+    } catch (refreshError) {
+        debugLog('[GuidedGenerations][Corrections] Could not refresh swipe buttons:', refreshError);
     }
 
     if (typeof context.saveChat === 'function') {

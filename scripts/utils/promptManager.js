@@ -50,10 +50,14 @@ export async function loadPromptCatalog({ force = false } = {}) {
 
 export async function getPromptValue(keyPath, fallback = '', { settings = null, settingsKey = keyPath } = {}) {
     const overrideSettingKey = getPromptOverrideSettingKey(settingsKey);
-    const useSettingOverride = Boolean(settings?.[overrideSettingKey]);
+    // The flag is named "Use prompts.json". When checked (default), the
+    // external prompts.json file takes precedence over the internal settings
+    // value. When unchecked, the user's saved internal setting value is used
+    // instead (e.g. for custom prompts carried over from before this option).
+    const usePromptsJson = settings?.[overrideSettingKey] !== false;
     const hasSettingValue = settings && settingsKey && Object.prototype.hasOwnProperty.call(settings, settingsKey);
     const settingValue = hasSettingValue ? settings[settingsKey] : undefined;
-    if (useSettingOverride && typeof settingValue === 'string') {
+    if (!usePromptsJson && typeof settingValue === 'string') {
         return settingValue;
     }
 
@@ -61,6 +65,11 @@ export async function getPromptValue(keyPath, fallback = '', { settings = null, 
     const fileValue = getNestedValue(catalog, keyPath);
     if (typeof fileValue === 'string') {
         return fileValue;
+    }
+
+    // Fall back to the internal setting value if the file doesn't have it.
+    if (typeof settingValue === 'string') {
+        return settingValue;
     }
 
     return fallback;

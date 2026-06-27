@@ -76,17 +76,17 @@ function setupPromptOverrideToggles(container) {
         checkbox.className = 'gg-setting-input';
 
         wrapper.appendChild(checkbox);
-        wrapper.append('Use settings override');
+        wrapper.append('Use prompts.json');
 
         textarea.insertAdjacentElement('afterend', wrapper);
 
-        // Live-tick the override checkbox as the user edits the prompt.
-        // The persisted change itself is handled by the delegated `change`
-        // listener in index.js; this only keeps the checkbox visual in sync
-        // while typing, before blur fires.
+        // When the user edits the prompt, uncheck "Use prompts.json" so the
+        // edited internal value is used instead of the file. Persistence is
+        // handled by the delegated `change` listener in index.js; this only
+        // keeps the checkbox visual in sync while typing, before blur fires.
         textarea.addEventListener('input', () => {
-            if (!checkbox.checked) {
-                checkbox.checked = true;
+            if (checkbox.checked) {
+                checkbox.checked = false;
             }
         });
     }

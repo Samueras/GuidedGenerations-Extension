@@ -514,7 +514,7 @@
                 <details class="guide-prompt-overrides-section gg-collapsible-section"> <!-- Added wrapper -->
                     <summary>
                         <h4>Guide Prompt Overrides</h4>
-                        <small class="setting_item_description">By default prompts are loaded from <code>prompts.json</code> in the extension folder. Enable "Use settings override" on a prompt to use the value saved here instead of the file; editing a prompt here enables that toggle automatically. Changes made here are saved in SillyTavern user settings and do not rewrite <code>prompts.json</code>. Use <code>&#123;&#123;input&#125;&#125;</code> where you want the original user text to be inserted (if applicable). Raw and Depth controls are still saved here.</small>
+                        <small class="setting_item_description">By default prompts are loaded from <code>prompts.json</code> in the extension folder. Each prompt has a "Use prompts.json" checkbox — checked (default) means the file is the source, unchecked means your own saved value is used instead. Editing a prompt here unchecks that box automatically so your edit takes effect. Changes made here are saved in SillyTavern user settings and do not rewrite <code>prompts.json</code>. Use <code>&#123;&#123;input&#125;&#125;</code> where you want the original user text to be inserted (if applicable). Raw and Depth controls are still saved here.</small>
                         <button type="button" id="ggDownloadDefaultPrompts" class="menu_button" style="margin-top: 8px;">Download default prompts.json from GitHub</button>
                     </summary>
                     <!-- Textareas for overriding default guide prompts -->
