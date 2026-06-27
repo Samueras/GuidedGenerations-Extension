@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Media/GG Logo Text.png" alt="Guided Generations" width="600">
+</p>
+
 # Guided Generations Extension for SillyTavern
 
 This extension brings the full power of the original "Guided Generations" Quick Reply set to SillyTavern as a native extension. It provides modular, context-aware tools for shaping, refining, and guiding AI responses—ideal for roleplay, story, and character-driven chats. All features are accessible via intuitive buttons and menus integrated into the SillyTavern UI.
