@@ -49,6 +49,7 @@ const spellchecker = async () => {
                 prompt: filledPrompt,
                 debugLabel: 'spellchecker',
                 includeChatHistory: false,
+                includeIdentityContext: false,
             });
         } else {
             const context = SillyTavern.getContext();

@@ -1,6 +1,7 @@
 import {
     getContext,
     extensionName,
+    extension_settings,
     debugLog,
     debugWarn,
     getCurrentProfile,
@@ -23,6 +24,112 @@ const TEXT_API_IDS = new Set([
     'text',
     'llamacpp',
 ]);
+const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
+const INTERNAL_HELPER_PRESET_DEFAULT_MAX_TOKENS = 4000;
+const INTERNAL_HELPER_PRESET_CHAT_OVERRIDES = {
+    prompts: [
+        {
+            name: 'Main Prompt',
+            system_prompt: true,
+            role: 'system',
+            content: '[You are a utility assistant for an ongoing roleplay chat. Complete only the task given. Stay accurate and concise. Return only the requested output, with no preamble, explanation, labels, or meta-commentary.]',
+            identifier: 'main',
+            injection_position: 0,
+            injection_depth: 4,
+            forbid_overrides: true,
+        },
+        {
+            name: 'NSFW Prompt',
+            system_prompt: true,
+            role: 'system',
+            content: 'NSFW/Smut is allowed.',
+            identifier: 'nsfw',
+            injection_position: 0,
+            injection_depth: 4,
+            forbid_overrides: false,
+        },
+        { identifier: 'dialogueExamples', name: 'Chat Examples', system_prompt: true, marker: true },
+        { name: 'Jailbreak Prompt', system_prompt: true, role: 'system', content: '', identifier: 'jailbreak', injection_position: 0, injection_depth: 4, forbid_overrides: false },
+        { identifier: 'chatHistory', name: 'Chat History', system_prompt: true, marker: true },
+        { identifier: 'worldInfoAfter', name: 'World Info (after)', system_prompt: true, marker: true },
+        { identifier: 'worldInfoBefore', name: 'World Info (before)', system_prompt: true, marker: true },
+        { identifier: 'charDescription', name: 'Char Description', system_prompt: true, marker: true },
+        { identifier: 'charPersonality', name: 'Char Personality', system_prompt: true, marker: true },
+        { identifier: 'scenario', name: 'Scenario', system_prompt: true, marker: true },
+        { identifier: 'personaDescription', name: 'Persona Description', system_prompt: true, marker: true },
+    ],
+    prompt_order: [
+        {
+            character_id: 100000,
+            order: [
+                { identifier: 'main', enabled: true },
+                { identifier: 'worldInfoBefore', enabled: true },
+                { identifier: 'charDescription', enabled: true },
+                { identifier: 'charPersonality', enabled: true },
+                { identifier: 'scenario', enabled: true },
+                { identifier: 'nsfw', enabled: true },
+                { identifier: 'worldInfoAfter', enabled: true },
+                { identifier: 'dialogueExamples', enabled: true },
+                { identifier: 'chatHistory', enabled: true },
+                { identifier: 'jailbreak', enabled: true },
+            ],
+        },
+        {
+            character_id: 100001,
+            order: [
+                { identifier: 'main', enabled: true },
+                { identifier: 'worldInfoBefore', enabled: true },
+                { identifier: 'personaDescription', enabled: true },
+                { identifier: 'charDescription', enabled: true },
+                { identifier: 'scenario', enabled: true },
+                { identifier: 'charPersonality', enabled: true },
+                { identifier: 'nsfw', enabled: false },
+                { identifier: 'worldInfoAfter', enabled: true },
+                { identifier: 'dialogueExamples', enabled: true },
+                { identifier: 'chatHistory', enabled: true },
+                { identifier: 'jailbreak', enabled: false },
+            ],
+        },
+    ],
+};
+
+function getInternalHelperPresetMaxTokens() {
+    const raw = extension_settings[extensionName]?.internalHelperPresetMaxTokens;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return INTERNAL_HELPER_PRESET_DEFAULT_MAX_TOKENS;
+    }
+    return parsed;
+}
+
+// Strips character/persona/world-info prompt entries from the internal helper
+// preset for tools (spellchecker, tracker) that should NOT receive identity
+// context. Returns a new preset object (original is not mutated).
+const IDENTITY_PROMPT_IDENTIFIERS = new Set([
+    'charDescription',
+    'charPersonality',
+    'scenario',
+    'personaDescription',
+    'worldInfoBefore',
+    'worldInfoAfter',
+]);
+
+function stripIdentityPromptsFromHelperPreset(preset) {
+    if (!preset || typeof preset !== 'object') return preset;
+    const stripped = structuredClone(preset);
+    if (Array.isArray(stripped.prompts)) {
+        stripped.prompts = stripped.prompts.filter((p) => p && !IDENTITY_PROMPT_IDENTIFIERS.has(p.identifier));
+    }
+    if (Array.isArray(stripped.prompt_order)) {
+        stripped.prompt_order = stripped.prompt_order.map((entry) => ({
+            ...entry,
+            order: Array.isArray(entry?.order)
+                ? entry.order.filter((o) => o && !IDENTITY_PROMPT_IDENTIFIERS.has(o.identifier))
+                : entry?.order,
+        }));
+    }
+    return stripped;
+}
 
 function resolveProfileByNameOrId(profileName, profiles = []) {
     if (!profileName) return null;
@@ -93,9 +200,11 @@ async function getCurrentProfileAndPreset() {
 }
 
 function resolvePresetNameFromManager(presetManager, presetValue) {
-    if (!presetManager || !presetValue) return '';
+    if (!presetValue) return '';
     const presetName = normalizePresetName(presetValue);
     if (!presetName) return '';
+    if (presetName === INTERNAL_HELPER_PRESET_VALUE) return presetName;
+    if (!presetManager) return '';
 
     debugLog(`[${extensionName}] resolvePresetNameFromManager: input="${presetName}" manager=${!!presetManager}`);
 
@@ -136,7 +245,14 @@ function resolvePresetNameFromManager(presetManager, presetValue) {
 }
 
 function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'chat') {
-    if (!presetName || !presetManager) return {};
+    if (!presetName) return {};
+    if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
+        if (mode !== 'chat') return {};
+        const payload = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
+        payload.max_tokens = getInternalHelperPresetMaxTokens();
+        return payload;
+    }
+    if (!presetManager) return {};
     const preset = presetManager.getCompletionPresetByName?.(presetName);
     if (!preset) {
         debugWarn(`[${extensionName}] buildPresetOverridePayload: preset "${presetName}" not found.`);
@@ -327,11 +443,58 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         return baseMessages || [];
     }
 
+    const { includeIdentityContext = true } = options;
     const originalSettings = structuredClone(helpers.oai_settings || {});
-    const preset = getOpenAIPresetByName(helpers, presetName);
-    if (!preset) {
-        debugLog(`[${extensionName}] buildChatMessagesWithPromptManager: preset "${presetName}" not found in openai settings.`);
+
+    // Some persona integrations (e.g. MultiPersonaComposer) merge their
+    // descriptions directly into powerUserSettings.persona_description, which
+    // the OpenAI prompt manager reads at build time — bypassing the params we
+    // pass. When identity context is disabled, temporarily blank those fields
+    // and restore them afterwards. This is safe regardless of whether such an
+    // integration is installed.
+    const powerUserSettings = context?.powerUserSettings;
+    const PERSONA_DESCRIPTION_FIELDS = [
+        'persona_description',
+        'persona_description_position',
+        'persona_description_depth',
+        'persona_description_role',
+        'persona_description_lorebook',
+    ];
+    const originalPersonaDescription = {};
+    let personaDescriptionWasBlanked = false;
+    if (!includeIdentityContext && powerUserSettings && typeof powerUserSettings === 'object') {
+        for (const key of PERSONA_DESCRIPTION_FIELDS) {
+            if (key in powerUserSettings) {
+                originalPersonaDescription[key] = powerUserSettings[key];
+                personaDescriptionWasBlanked = true;
+            }
+        }
+        if (personaDescriptionWasBlanked) {
+            for (const key of PERSONA_DESCRIPTION_FIELDS) {
+                powerUserSettings[key] = '';
+            }
+            debugLog(`[${extensionName}] buildChatMessagesWithPromptManager: temporarily blanked persona description fields for identity-less request.`);
+        }
     }
+
+    let preset = null;
+    if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
+        preset = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
+        preset.max_tokens = getInternalHelperPresetMaxTokens();
+        if (!includeIdentityContext) {
+            preset = stripIdentityPromptsFromHelperPreset(preset);
+        }
+    } else {
+        preset = getOpenAIPresetByName(helpers, presetName);
+        if (!preset) {
+            debugLog(`[${extensionName}] buildChatMessagesWithPromptManager: preset "${presetName}" not found in openai settings.`);
+        }
+    }
+
+    // When identity context is explicitly disabled (e.g. spellchecker/tracker),
+    // also drop the live character/persona descriptions from the request params
+    // regardless of which preset is in use, so the LLM only sees the task prompt.
+    const stripIdentityFromParams = !includeIdentityContext;
 
     try {
         if (preset) {
@@ -368,11 +531,11 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         const character = context?.characters?.[context?.characterId] || {};
         const params = {
             name2: context?.name2 || character?.name || '',
-            charDescription: character?.description || '',
-            charPersonality: character?.personality || '',
-            scenario: character?.scenario || '',
-            worldInfoBefore: context?.worldInfoBefore || '',
-            worldInfoAfter: context?.worldInfoAfter || '',
+            charDescription: stripIdentityFromParams ? '' : (character?.description || ''),
+            charPersonality: stripIdentityFromParams ? '' : (character?.personality || ''),
+            scenario: stripIdentityFromParams ? '' : (character?.scenario || ''),
+            worldInfoBefore: stripIdentityFromParams ? '' : (context?.worldInfoBefore || ''),
+            worldInfoAfter: stripIdentityFromParams ? '' : (context?.worldInfoAfter || ''),
             bias: context?.bias || '',
             type: 'normal',
             quietPrompt: context?.quietPrompt || '',
@@ -395,6 +558,15 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         debugWarn(`[${extensionName}] Failed to build messages with prompt manager:`, error);
     } finally {
         Object.assign(helpers.oai_settings, originalSettings);
+        if (personaDescriptionWasBlanked) {
+            for (const key of PERSONA_DESCRIPTION_FIELDS) {
+                if (key in originalPersonaDescription) {
+                    powerUserSettings[key] = originalPersonaDescription[key];
+                } else {
+                    delete powerUserSettings[key];
+                }
+            }
+        }
     }
 
     return baseMessages;
@@ -408,7 +580,7 @@ export async function shouldUseDirectCall(profileName = '', presetName = '') {
     const context = getContext();
     if (!context) return false;
 
-    if (targetPreset) {
+    if (targetPreset && targetPreset !== INTERNAL_HELPER_PRESET_VALUE) {
         const apiType = await getProfileApiType(targetProfile || (await getCurrentProfile()));
         const apiId = extractApiIdFromApiType(apiType) || apiType;
         const presetManager = context?.getPresetManager?.(apiId);
@@ -419,6 +591,13 @@ export async function shouldUseDirectCall(profileName = '', presetName = '') {
             debugWarn(`[${extensionName}] Preset "${targetPreset}" not found for api "${apiId}", using default call.`);
             return false;
         }
+    } else if (targetPreset === INTERNAL_HELPER_PRESET_VALUE) {
+        const apiType = await getProfileApiType(targetProfile || (await getCurrentProfile()));
+        const apiId = extractApiIdFromApiType(apiType) || apiType;
+        if (TEXT_API_IDS.has((apiId || '').toLowerCase())) {
+            return false;
+        }
+        return true;
     }
 
     const { profileName: currentProfile, presetName: currentPreset } = await getCurrentProfileAndPreset();
@@ -441,6 +620,7 @@ export async function requestCompletion({
     optionsOverrides = {},
     debugLabel = '',
     includeChatHistory = true,
+    includeIdentityContext = true,
 } = {}) {
     const context = getContext();
     if (!context) {
@@ -491,7 +671,7 @@ export async function requestCompletion({
             context,
             requestData.messages,
             resolvedPresetName,
-            { prompt, includeChatHistory }
+            { prompt, includeChatHistory, includeIdentityContext }
         );
     }
 

@@ -82,6 +82,7 @@ export async function executeTracker(isAuto = false, force = false) {
                 presetName: trackerDeterminePreset,
                 prompt: guidePrompt,
                 debugLabel: 'tracker:determine',
+                includeIdentityContext: false,
             });
         } else {
             const guideResult = await context.executeSlashCommandsWithOptions(
@@ -135,6 +136,7 @@ export async function executeTracker(isAuto = false, force = false) {
                 prompt: trackerPrompt,
                 debugLabel: 'tracker:update',
                 includeChatHistory: false,
+                includeIdentityContext: false,
             });
         } else {
             const trackerResult = await context.executeSlashCommandsWithOptions(

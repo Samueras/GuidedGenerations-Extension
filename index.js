@@ -50,6 +50,7 @@ export const extensionName = "GuidedGenerations-Extension"; // Use the simple na
 // const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`; // No longer needed
 
 let isSending = false;
+const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
 
 // Debug message capture array - only populated when debug mode is enabled
 let debugMessages = [];
@@ -200,33 +201,34 @@ export const defaultSettings = {
     debugMode: false, // Default off: Toggle for debug logging
     persistentGuidesInChatlog: true, // Default on: Show persistent guides in chatlog
     injectionEndRole: 'system', // NEW SETTING: Default role for non-chat injections
+    internalHelperPresetMaxTokens: 4000, // Max response tokens for GG Internal Helper Preset
     // Profile and Preset settings for each guide
     profileClothes: '', // Profile for Clothes Guide
-    presetClothes: '',
+    presetClothes: INTERNAL_HELPER_PRESET_VALUE,
     profileClothesApiType: '', // API type for Clothes Guide profile
     profileState: '', // Profile for State Guide
-    presetState: '',
+    presetState: INTERNAL_HELPER_PRESET_VALUE,
     profileStateApiType: '', // API type for State Guide profile
     profileThinking: '', // Profile for Thinking Guide
-    presetThinking: '',
+    presetThinking: INTERNAL_HELPER_PRESET_VALUE,
     profileThinkingApiType: '', // API type for Thinking Guide profile
     profileSituational: '', // Profile for Situational Guide
-    presetSituational: '',
+    presetSituational: INTERNAL_HELPER_PRESET_VALUE,
     profileSituationalApiType: '', // API type for Situational Guide profile
     profileRules: '', // Profile for Rules Guide
-    presetRules: '',
+    presetRules: INTERNAL_HELPER_PRESET_VALUE,
     profileRulesApiType: '', // API type for Rules Guide profile
     profileCustom: '', // Profile for Custom Guide
-    presetCustom: '',
+    presetCustom: INTERNAL_HELPER_PRESET_VALUE,
     profileCustomApiType: '', // API type for Custom Guide profile
     profileCorrections: '', // Profile for Corrections
     presetCorrections: '',
     profileCorrectionsApiType: '', // API type for Corrections profile
     profileSeparatedThinking: '', // Profile for Separated Thinking
-    presetSeparatedThinking: '',
+    presetSeparatedThinking: INTERNAL_HELPER_PRESET_VALUE,
     profileSeparatedThinkingApiType: '', // API type for Separated Thinking profile
     profileSpellchecker: '', // Profile for Spellchecker
-    presetSpellchecker: '',
+    presetSpellchecker: INTERNAL_HELPER_PRESET_VALUE,
     profileSpellcheckerApiType: '', // API type for Spellchecker profile
     profileEditIntros: '', // Profile for Edit Intros
     presetEditIntros: '',
@@ -249,10 +251,10 @@ export const defaultSettings = {
     profileFunApiType: '', // API type for Fun Prompts profile
     // Separate tracker settings for the two calls
     profileTrackerDetermine: '', // Profile for Tracker: Determine Changes
-    presetTrackerDetermine: '', // Preset for Tracker: Determine Changes
+    presetTrackerDetermine: INTERNAL_HELPER_PRESET_VALUE, // Preset for Tracker: Determine Changes
     profileTrackerDetermineApiType: '', // API type for Tracker: Determine Changes
     profileTrackerUpdate: '', // Profile for Tracker: Update with Changes
-    presetTrackerUpdate: '', // Preset for Tracker: Update with Changes
+    presetTrackerUpdate: INTERNAL_HELPER_PRESET_VALUE, // Preset for Tracker: Update with Changes
     profileTrackerUpdateApiType: '', // API type for Tracker: Update with Changes
     // Guide prompt overrides
     promptClothes: '[OOC: Answer me out of Character! Don\'t continue the RP.  Considering where we are currently in the story, write me a list entailing the clothes and look, what they are currently wearing of all participating characters, including {{user}}, that are present in the current scene. Don\'t mention people or clothing pieces no longer relevant to the ongoing scene.] ',
@@ -523,7 +525,7 @@ async function updateSettingsUI() {
         }
 
         // Populate depth number input fields
-        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe'].forEach(key => {
+        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe', 'internalHelperPresetMaxTokens'].forEach(key => {
             const input = document.getElementById(`gg_${key}`);
             if (input) {
                 input.value = extension_settings[extensionName][key] ?? defaultSettings[key] ?? 0; // Default to 0 if undefined
@@ -770,6 +772,10 @@ async function handleProfileChangeForPresets(selectedProfile, presetDropdown) {
 function populatePresetDropdownWithList(presetSelect, presetList) {
     // Clear existing options
     presetSelect.innerHTML = '<option value="">None</option>';
+    const internalOption = document.createElement('option');
+    internalOption.value = INTERNAL_HELPER_PRESET_VALUE;
+    internalOption.textContent = 'GG Internal Helper Preset';
+    presetSelect.appendChild(internalOption);
     
     // Check if presetList is valid
     if (!presetList) {
@@ -1549,110 +1555,6 @@ async function setup() {
     initGuidedContinueListeners();
 }
 
-// --- Preset Installation ---
-// Installs the text completion preset defined within GGSytemPrompt.json if it doesn't exist.
-// This file should be a full preset object exported from SillyTavern.
-async function installPreset() {
-    const presetFileName = 'GGSytemPrompt.json';
-    // Derive the preset name from the filename (matching manual import behavior)
-    const presetName = presetFileName.replace(/\.json$/i, ''); // Remove .json extension case-insensitively
-    // Preset type for Chat Completion parameters (OpenAI/ChatGPT style models)
-    const presetApiId = 'openai'; 
-    // Construct the path relative to the SillyTavern root
-    const presetPath = `scripts/extensions/third-party/${extensionName}/${presetFileName}`;
-
-    try {
-        const response = await fetch(presetPath);
-
-        if (!response.ok) {
-            console.error(`${extensionName}: Failed to fetch ${presetFileName}. Status: ${response.status}`);
-            if (response.status === 404) {
-                 console.error(`${extensionName}: Make sure '${presetFileName}' exists in the '${extensionName}' extension folder.`);
-            }
-            return;
-        }
-
-        // Read the full preset data from the JSON file
-        const presetData = await response.json(); 
-
-        // Validate internal structure: Must have a prompts array with at least one entry containing name and content.
-        // Keep this validation even for chat completion presets to ensure the file has the right structure
-        if (!presetData || typeof presetData !== 'object' || 
-            !Array.isArray(presetData.prompts) || presetData.prompts.length === 0 || 
-            !presetData.prompts[0].name || typeof presetData.prompts[0].content !== 'string') {
-            console.error(`${extensionName}: Invalid internal structure in ${presetFileName}. It must be an object containing a 'prompts' array, where the first element has 'name' and 'content' properties. Received structure:`, presetData);
-            return;
-        }
-
-        const presetManager = getPresetManager(presetApiId);
-
-        if (!presetManager) {
-            console.error(`${extensionName}: Could not get Preset Manager for apiId '${presetApiId}'.`);
-            return;
-        }
-
-        // Store the currently selected preset name/value before we install ours
-        let currentPresetName = null;
-        try {
-            // Get the currently selected option
-            const $select = $(presetManager.select);
-            const currentValue = $select.val();
-            
-            if (presetManager.isKeyedApi()) {
-                // For keyed APIs (like 'openai'), the value is the name
-                currentPresetName = currentValue;
-            } else {
-                // For indexed APIs, we need to get the text of the selected option
-                currentPresetName = $select.find('option:selected').text();
-            }
-        } catch(err) {
-            console.warn(`${extensionName}: Could not determine current preset: ${err}`);
-        }
-
-        // Check if preset already exists using the filename-derived name
-        const existingPreset = presetManager.findPreset(presetName);
-
-        if (existingPreset !== undefined && existingPreset !== null) {
-            // console.log(`${extensionName}: Preset "${presetName}" (${presetApiId}) already exists. Skipping installation.`);
-        } else {
-            // console.log(`${extensionName}: Preset "${presetName}" (${presetApiId}) not found. Attempting to save...`);
-            // Save the entire original presetData object, using the filename-derived name.
-            // This matches how performMasterImport handles chat completion presets.
-            await presetManager.savePreset(presetName, presetData);
-            // console.log(`${extensionName}: Preset "${presetName}" (${presetApiId}) successfully saved (using full data structure and filename).`);
-            
-            // If we had a previously selected preset, switch back to it
-            if (currentPresetName && currentPresetName !== presetName) {
-                try {
-                    // This uses jQuery to select the option and trigger the change event
-                    // This is the same way PresetManager does it internally
-                    setTimeout(() => {
-                        const $select = $(presetManager.select);
-                        if (presetManager.isKeyedApi()) {
-                            $select.val(currentPresetName).trigger('change');
-                        } else {
-                            // For indexed APIs, find the option with the matching text
-                            const $option = $select.find(`option:contains("${currentPresetName}")`);
-                            if ($option.length > 0) {
-                                $select.val($option.val()).trigger('change');
-                            }
-                        }
-                        // console.log(`${extensionName}: Restored previous ${presetApiId} preset: "${currentPresetName}"`);
-                    }, 100); // Small delay to ensure the DOM has updated
-                } catch(err) {
-                    console.warn(`${extensionName}: Could not restore previous preset: ${err}`);
-                }
-            }
-        }
-
-    } catch (error) {
-        console.error(`${extensionName}: Error during preset installation:`, error);
-        if (error instanceof SyntaxError) {
-             console.error(`${extensionName}: Check if ${presetFileName} contains valid JSON.`);
-        }
-    }
-}
-
 // Debounced version of the counter update function
 let updatePersistentGuideCounterDebounced;
 let shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
@@ -1765,9 +1667,6 @@ $(document).ready(async function () {
         loadSettingsPanel(context); // Pass context
     }, 1000);
 
-    // Attempt to install the preset (can run relatively early)
-    installPreset();
-    
     // Initialize other scripts that need context or should run on ready
 
     // Also set up a mutation observer to detect when the QR bar might be added/removed

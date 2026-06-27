@@ -190,7 +190,7 @@
                 <details class="gg-collapsible-section">
                     <summary>
                         <h4>Preset Usage</h4>
-                        <small class="setting_item_description">Assign specific System Prompts (Presets) to different Guided Generation actions. When a preset is selected, it will be temporarily activated just before the guide runs, then deactivated. Use the 'GGSystemPrompt' button to quickly fill the field with the default guidance preset.</small>
+                        <small class="setting_item_description">Assign a profile and preset baseline to each Guided Generation action. The extension now applies selected profile/preset behavior internally per request (without globally switching your active profile). Select <code>GG Internal Helper Preset</code> to use the built-in helper-oriented prompt/tokens override while keeping your current profile context and model settings as baseline. Select <code>None</code> if you want to run with your currently active preset behavior only.</small>
                     </summary>
                 
                 <!-- Profile System Controls -->
@@ -199,6 +199,20 @@
                         Refresh Profile Dropdowns
                     </button>
                     <span id="profileDebugStatus" style="font-style: italic; color: var(--SmartThemeBodyColor); opacity: 0.6;"></span>
+                </div>
+                
+                <div class="setting_item">
+                    <h4>Internal Helper Preset</h4>
+                    <small class="setting_item_description">
+                        Settings for actions using <code>GG Internal Helper Preset</code>.
+                    </small>
+                    <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px;">
+                        <div style="flex: 1; min-width: 0;">
+                            <label for="gg_internalHelperPresetMaxTokens" style="margin-bottom: 5px; display: block; font-weight: bold;">Max Response Tokens:</label>
+                            <input type="number" id="gg_internalHelperPresetMaxTokens" name="internalHelperPresetMaxTokens" class="gg-setting-input text_pole" min="1" max="128000" value="4000" style="width: 100px;">
+                            <small class="setting_item_description">Max tokens for helper preset requests (default: 4000)</small>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Preset fields for each guide/tool -->
