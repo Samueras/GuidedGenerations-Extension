@@ -772,10 +772,23 @@ async function handleProfileChangeForPresets(selectedProfile, presetDropdown) {
 function populatePresetDropdownWithList(presetSelect, presetList) {
     // Clear existing options
     presetSelect.innerHTML = '<option value="">None</option>';
-    const internalOption = document.createElement('option');
-    internalOption.value = INTERNAL_HELPER_PRESET_VALUE;
-    internalOption.textContent = 'GG Internal Helper Preset';
-    presetSelect.appendChild(internalOption);
+
+    // The internal helper preset is only available for guides/tools where an
+    // explicit decision was made about how it should behave (identity context
+    // on/off, chat history on/off). It is intentionally hidden from features
+    // like Impersonation, Edit Intros, and Fun prompts.
+    const INTERNAL_HELPER_ELIGIBLE_GUIDES = new Set([
+        'Clothes', 'State', 'Thinking', 'Situational', 'Rules', 'Custom',
+        'CustomAuto', 'Corrections', 'SeparatedThinking', 'Spellchecker',
+        'TrackerDetermine', 'TrackerUpdate',
+    ]);
+    const guideKey = (presetSelect?.name || presetSelect?.id || '').replace(/^preset/, '');
+    if (guideKey && INTERNAL_HELPER_ELIGIBLE_GUIDES.has(guideKey)) {
+        const internalOption = document.createElement('option');
+        internalOption.value = INTERNAL_HELPER_PRESET_VALUE;
+        internalOption.textContent = 'GG Internal Helper Preset';
+        presetSelect.appendChild(internalOption);
+    }
     
     // Check if presetList is valid
     if (!presetList) {
