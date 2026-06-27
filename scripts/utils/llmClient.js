@@ -210,6 +210,15 @@ function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'ch
             payload.temperature = payload.temp;
         }
 
+        if (payload.seed !== undefined) {
+            const parsedSeed = Number(payload.seed);
+            if (!Number.isInteger(parsedSeed) || parsedSeed < 0) {
+                delete payload.seed;
+            } else {
+                payload.seed = parsedSeed;
+            }
+        }
+
         debugLog(`[${extensionName}] buildPresetOverridePayload: text payload keys=${Object.keys(payload).join(',')}`);
         return payload;
     }
@@ -278,6 +287,15 @@ function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'ch
             payload.max_tokens = payload.openai_max_tokens;
         }
         delete payload.openai_max_tokens;
+    }
+
+    if (payload.seed !== undefined) {
+        const parsedSeed = Number(payload.seed);
+        if (!Number.isInteger(parsedSeed) || parsedSeed < 0) {
+            delete payload.seed;
+        } else {
+            payload.seed = parsedSeed;
+        }
     }
 
     debugLog(`[${extensionName}] buildPresetOverridePayload: payload keys=${Object.keys(payload).join(',')}`);
