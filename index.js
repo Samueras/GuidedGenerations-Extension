@@ -604,10 +604,26 @@ const handleSettingsChangeDelegated = async (event) => {
                         extension_settings[extensionName][apiTypeFieldName] = apiType;
                         debugLog(`[${extensionName}] Stored API type "${apiType}" for profile "${selectedProfile}"`);
                     }
+                } else if (extension_settings[extensionName]) {
+                    const apiTypeFieldName = `${event.target.name}ApiType`;
+                    extension_settings[extensionName][apiTypeFieldName] = '';
                 }
                 
                 // Update the preset dropdown
                 await handleProfileChangeForPresets(selectedProfile, presetSelect);
+
+                // If profile is set to None, also clear the underlying preset setting.
+                // Without this, the dropdown text can show "None" while settings still
+                // retain the old preset id/name in the background.
+                if (!selectedProfile || selectedProfile.trim() === '') {
+                    const presetSettingName = presetSelect.name || `preset${guideName}`;
+                    presetSelect.value = '';
+                    if (extension_settings[extensionName]) {
+                        extension_settings[extensionName][presetSettingName] = '';
+                        saveSettingsDebounced();
+                    }
+                    debugLog(`[${extensionName}] Cleared ${presetSettingName} because ${event.target.name} was set to None.`);
+                }
             }
         }
     }
