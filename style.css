@@ -461,21 +461,32 @@
     position: relative;
 }
 
+/* Persistent highlight layer. Shown only when the textarea is blurred — while
+   the textarea has focus the native selection is authoritative and this layer
+   is hidden, so they never compete. Geometry matches the textarea exactly so the
+   yellow sits on the correct text. */
 .gg-corrections-message-overlay {
     position: absolute;
     inset: 0;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
     padding: 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    font: inherit;
+    line-height: 1.4;
     white-space: pre-wrap;
+    overflow-wrap: break-word;
     word-break: break-word;
-    color: transparent;
-    background: transparent;
+    color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
     pointer-events: none;
     z-index: 1;
-    font: inherit;
-    overflow: auto;
     overflow: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    display: none;
 }
 
 .gg-corrections-message-overlay::-webkit-scrollbar {
@@ -483,15 +494,36 @@
 }
 
 .gg-corrections-message {
-    position: relative;
-    z-index: 2;
-    background-color: transparent;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
     padding: 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
     font: inherit;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    resize: vertical;
+    overflow: auto;
+}
+
+/* Recolor the native selection inside the corrections textarea so the
+   highlighted text matches the persistent overlay color. */
+.gg-corrections-message::selection {
+    background-color: rgba(255, 215, 0, 0.45);
+    color: var(--SmartThemeBodyColor);
+}
+
+.gg-corrections-message::-moz-selection {
+    background-color: rgba(255, 215, 0, 0.45);
+    color: var(--SmartThemeBodyColor);
 }
 
 .gg-corrections-selection {
-    background-color: rgba(255, 215, 0, 0.35);
+    background-color: rgba(255, 215, 0, 0.45);
+    color: var(--SmartThemeBodyColor);
 }
 
 .gg-corrections-nav {

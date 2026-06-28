@@ -171,9 +171,17 @@ class CorrectionsPopup {
             messageTextarea.addEventListener('mouseup', recordSelection);
             messageTextarea.addEventListener('keyup', recordSelection);
             messageTextarea.addEventListener('select', recordSelection);
-            messageTextarea.addEventListener('blur', recordSelection);
-            messageTextarea.addEventListener('focus', () => this.restoreSelection(messageTextarea));
-            // Keep the highlight overlay aligned with the textarea's viewport.
+            // While focused, the native (yellow-tinted) selection is authoritative —
+            // hide the overlay so the two never compete.
+            messageTextarea.addEventListener('focus', () => {
+                this.hideOverlay();
+                this.restoreSelection(messageTextarea);
+            });
+            // On blur, paint a permanent yellow highlight from the recorded range so
+            // the selection stays visible while the user edits the instruction box.
+            messageTextarea.addEventListener('blur', () => {
+                this.renderPersistentHighlight(messageTextarea.value || '');
+            });
             const syncOverlayScroll = () => this.syncOverlayScroll(messageTextarea);
             messageTextarea.addEventListener('scroll', syncOverlayScroll, { passive: true });
         }
@@ -285,7 +293,10 @@ class CorrectionsPopup {
         this.selectionStart = null;
         this.selectionEnd = null;
         this.updateSelectionIndicator();
-        this.renderSelectionOverlay(currentSwipe, messageTextarea);
+        // Clear any persistent highlight from the previous message.
+        this.hideOverlay();
+        const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
+        if (overlay) overlay.innerHTML = '';
     }
 
     recordSelection(textarea) {
@@ -296,7 +307,6 @@ class CorrectionsPopup {
             this.selectionStart = start;
             this.selectionEnd = end;
             this.updateSelectionIndicator();
-            this.renderSelectionOverlay(textarea.value || '', textarea);
         }
     }
 
@@ -312,21 +322,43 @@ class CorrectionsPopup {
         }
     }
 
-    renderSelectionOverlay(text, textarea) {
+    hideOverlay() {
+        const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    showOverlay() {
+        const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
+        if (overlay) overlay.style.display = 'block';
+    }
+
+    /**
+     * Paint a permanent yellow highlight on the recorded range. Called on blur
+     * so the selection stays visible while the user types in the instruction
+     * field. Only the stored range is trusted (not live textarea indices, which
+     * can be corrupted after blur).
+     */
+    renderPersistentHighlight(text) {
         const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
         if (!overlay) return;
 
-        const { start, end, hasSelection } = this.resolveSelection(text, textarea);
-        if (!hasSelection) {
+        const hasStored = typeof this.selectionStart === 'number'
+            && typeof this.selectionEnd === 'number'
+            && this.selectionEnd > this.selectionStart;
+
+        if (!hasStored) {
             overlay.innerHTML = escapeHtml(text || '');
-        } else {
-            const before = escapeHtml(text.slice(0, start));
-            const selected = escapeHtml(text.slice(start, end));
-            const after = escapeHtml(text.slice(end));
-            overlay.innerHTML = `${before}<span class="gg-corrections-selection">${selected}</span>${after}`;
+            overlay.style.display = 'none';
+            return;
         }
 
-        this.syncOverlayScroll(textarea);
+        const start = Math.max(0, Math.min(this.selectionStart, text.length));
+        const end = Math.max(start, Math.min(this.selectionEnd, text.length));
+        const before = escapeHtml(text.slice(0, start));
+        const selected = escapeHtml(text.slice(start, end));
+        const after = escapeHtml(text.slice(end));
+        overlay.innerHTML = `${before}<span class="gg-corrections-selection">${selected}</span>${after}`;
+        overlay.style.display = 'block';
     }
 
     syncOverlayScroll(textarea) {
@@ -351,11 +383,16 @@ class CorrectionsPopup {
     }
 
     resolveSelection(baseMessage, textarea) {
-        const activeStart = textarea?.selectionStart;
-        const activeEnd = textarea?.selectionEnd;
-        const hasActive = typeof activeStart === 'number' && typeof activeEnd === 'number' && activeEnd > activeStart;
-        if (hasActive) {
-            return { start: activeStart, end: activeEnd, hasSelection: true };
+        // Only trust live textarea indices while the field is focused. After blur,
+        // browsers may report a corrupted range (often selectionStart=0).
+        const isFocused = textarea && document.activeElement === textarea;
+        if (isFocused) {
+            const activeStart = textarea.selectionStart;
+            const activeEnd = textarea.selectionEnd;
+            const hasActive = typeof activeStart === 'number' && typeof activeEnd === 'number' && activeEnd > activeStart;
+            if (hasActive) {
+                return { start: activeStart, end: activeEnd, hasSelection: true };
+            }
         }
 
         const storedStart = this.selectionStart;
