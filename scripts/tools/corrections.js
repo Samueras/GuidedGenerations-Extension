@@ -466,7 +466,7 @@ class CorrectionsPopup {
             : await getPromptValue('corrections.fullMessageTask', '');
         const promptForModel = fillPromptTemplate(taskTemplate, {
             instruction: filledPrompt,
-            historyBlock: historyBlock ? `\n\nChat history:\n${historyBlock}` : '',
+            historyBlock: historyBlock ? `\n\nEarlier conversation history (oldest first; may be truncated by context limits):\n${historyBlock}\n\n--- End of history ---` : '',
             baseMessage,
             selectedText,
         });

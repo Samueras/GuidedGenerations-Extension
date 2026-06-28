@@ -335,6 +335,21 @@ function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'ch
             }
         }
 
+        // Text completion: createTextGenGenerationData hardcodes truncation_length
+        // and num_ctx from the GLOBAL max_context (the main UI value), ignoring the
+        // preset. The preset stores its context size as `max_length`. Map it to the
+        // backend keys so our override payload (spread last in presetToGeneratePayload)
+        // actually wins over the global-derived value. Drop `max_length` itself so it
+        // isn't misinterpreted by the backend as a generation-length parameter.
+        if (payload.max_length !== undefined) {
+            const presetContext = Number(payload.max_length);
+            if (Number.isFinite(presetContext) && presetContext > 0) {
+                payload.truncation_length = presetContext;
+                payload.num_ctx = presetContext;
+            }
+            delete payload.max_length;
+        }
+
         debugLog(`[${extensionName}] buildPresetOverridePayload: text payload keys=${Object.keys(payload).join(',')}`);
         return payload;
     }
