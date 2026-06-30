@@ -82,6 +82,7 @@ export async function executeTracker(isAuto = false, force = false) {
                 presetName: trackerDeterminePreset,
                 prompt: guidePrompt,
                 debugLabel: 'tracker:determine',
+                includeChatHistory: true,
                 includeIdentityContext: false,
             });
         } else {

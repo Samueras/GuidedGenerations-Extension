@@ -3,6 +3,7 @@
  */
 
 import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, fillPromptTemplate } from '../persistentGuides/guideExports.js'; // Import from central hub
+import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
 // Map to store fun prompts loaded from file
 let FUN_PROMPTS = {};
@@ -494,37 +495,10 @@ export class FunPopup {
         const messageData = context.chat[targetIndex];
         if (!messageData) return;
 
-        if (!Array.isArray(messageData.swipes)) {
-            messageData.swipes = [messageData.mes];
-        }
-        messageData.swipes.push(responseText);
-        messageData.swipe_id = messageData.swipes.length - 1;
-        messageData.mes = responseText;
-
-        const mesDom = document.querySelector(`#chat .mes[mesid="${targetIndex}"]`);
-        if (mesDom && typeof context.messageFormatting === 'function') {
-            const mesTextElement = mesDom.querySelector('.mes_text');
-            if (mesTextElement) {
-                mesTextElement.innerHTML = context.messageFormatting(
-                    messageData.mes,
-                    messageData.name,
-                    messageData.is_system,
-                    messageData.is_user,
-                    targetIndex
-                );
-            }
-            [...mesDom.querySelectorAll('.swipes-counter')].forEach((it) => {
-                it.textContent = `${messageData.swipe_id + 1}/${messageData.swipes.length}`;
-            });
-        }
-
-        if (context.eventSource && context.event_types) {
-            context.eventSource.emit(context.event_types.MESSAGE_SWIPED, targetIndex);
-        }
-
-        if (typeof context.saveChat === 'function') {
-            await context.saveChat();
-        }
+        await appendSwipeToMessage(context, targetIndex, responseText, {
+            source: 'manual',
+            model: 'Guided Generations',
+        });
     }
 
     /**

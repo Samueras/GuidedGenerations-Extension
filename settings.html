@@ -213,7 +213,12 @@
                         <div style="flex: 1; min-width: 0;">
                             <label for="gg_internalHelperPresetMaxTokens" style="margin-bottom: 5px; display: block; font-weight: bold;">Max Response Tokens:</label>
                             <input type="number" id="gg_internalHelperPresetMaxTokens" name="internalHelperPresetMaxTokens" class="gg-setting-input text_pole" min="1" max="128000" value="4000" style="width: 100px;">
-                            <small class="setting_item_description">Max tokens for helper preset requests (default: 4000)</small>
+                            <small class="setting_item_description">Max tokens the LLM may generate (default: 4000)</small>
+                        </div>
+                        <div style="flex: 1; min-width: 0;">
+                            <label for="gg_internalHelperPresetMaxContext" style="margin-bottom: 5px; display: block; font-weight: bold;">Max Context Tokens:</label>
+                            <input type="number" id="gg_internalHelperPresetMaxContext" name="internalHelperPresetMaxContext" class="gg-setting-input text_pole" min="0" max="128000" value="0" style="width: 100px;">
+                            <small class="setting_item_description">Total context budget (history + prompt). <code>0</code> = use SillyTavern's global Context Size value.</small>
                         </div>
                     </div>
                 </div>

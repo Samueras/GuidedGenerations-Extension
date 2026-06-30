@@ -102,6 +102,17 @@ function getInternalHelperPresetMaxTokens() {
     return parsed;
 }
 
+// Returns the Internal Helper Preset's context budget (openai_max_context),
+// or null when the user has left it at 0 (= follow SillyTavern's global value).
+function getInternalHelperPresetMaxContext() {
+    const raw = extension_settings[extensionName]?.internalHelperPresetMaxContext;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return null;
+    }
+    return parsed;
+}
+
 // Strips character/persona/world-info prompt entries from the internal helper
 // preset for tools (spellchecker, tracker) that should NOT receive identity
 // context. Returns a new preset object (original is not mutated).
@@ -183,20 +194,85 @@ function normalizePresetName(value) {
 
 async function getCurrentProfileAndPreset() {
     const context = getContext();
-    if (!context) return { profileName: '', presetName: '' };
+    if (!context) return { profileName: '', presetName: '', apiId: '', mode: '' };
 
     const profileName = await getCurrentProfile();
     let presetName = '';
+    let apiId = '';
+    let mode = '';
     try {
         const apiType = await getProfileApiType(profileName);
-        const apiId = extractApiIdFromApiType(apiType) || apiType;
+        apiId = extractApiIdFromApiType(apiType) || apiType;
         const presetManager = context?.getPresetManager?.(apiId);
         const selectedPreset = presetManager?.getSelectedPreset?.();
         presetName = normalizePresetName(selectedPreset);
+        mode = TEXT_API_IDS.has((apiId || '').toLowerCase()) ? 'text' : 'chat';
     } catch (error) {
         debugWarn(`[${extensionName}] Failed to resolve current preset:`, error);
     }
-    return { profileName, presetName };
+    return { profileName, presetName, apiId, mode };
+}
+
+/**
+ * Show a visible warning to the user via SillyTavern's toastr, falling back to
+ * console.warn if toastr is unavailable. Used when we cannot find a usable
+ * preset and are sending the request without sampler settings.
+ */
+function showVisibleWarning(message) {
+    try {
+        if (typeof toastr !== 'undefined' && toastr.warning) {
+            toastr.warning(message, 'Guided Generations', { timeOut: 8000, extendedTimeOut: 4000 });
+            return;
+        }
+    } catch (_) {
+        // ignore — fall through to console
+    }
+    console.warn(`[${extensionName}] ${message}`);
+}
+
+/**
+ * Resolve a fallback preset name when the user did not pick one for a tool.
+ *
+ * Strategy (in order):
+ *   1. The currently active global preset for the SAME completion mode
+ *      (chat/text) as the target profile. Only used when the active preset's
+ *      api type matches the target mode, so e.g. a chat preset is never used
+ *      for a text-completion request.
+ *   2. The preset bound to the profile itself (profile.preset), if any.
+ *
+ * Returns '' when neither fallback applies; the caller should then send the
+ * request without a preset and warn the user.
+ */
+async function resolveFallbackPresetName(context, presetManager, targetApiId, targetMode, profile) {
+    // 1) Try the currently selected preset of the matching mode.
+    try {
+        const { apiId: activeApiId, mode: activeMode, presetName: activePresetName } = await getCurrentProfileAndPreset();
+        if (activePresetName && activeMode === targetMode) {
+            // Resolve via the target's own preset manager so we know it exists
+            // for the api we are about to call.
+            const resolved = resolvePresetNameFromManager(presetManager, activePresetName);
+            if (resolved) {
+                debugLog(`[${extensionName}] resolveFallbackPresetName: using active preset "${resolved}" (mode=${activeMode}) for target api=${targetApiId}`);
+                return resolved;
+            }
+            // If active preset name isn't valid for the target api, fall through.
+            debugLog(`[${extensionName}] resolveFallbackPresetName: active preset "${activePresetName}" not valid for api=${targetApiId}, trying profile preset.`);
+        }
+    } catch (error) {
+        debugWarn(`[${extensionName}] resolveFallbackPresetName: failed to read active preset:`, error);
+    }
+
+    // 2) Fall back to the preset bound to the profile itself.
+    const profilePreset = profile?.preset;
+    if (profilePreset) {
+        const resolved = resolvePresetNameFromManager(presetManager, profilePreset);
+        if (resolved) {
+            debugLog(`[${extensionName}] resolveFallbackPresetName: using profile-bound preset "${resolved}" for target api=${targetApiId}`);
+            return resolved;
+        }
+    }
+
+    return '';
 }
 
 function resolvePresetNameFromManager(presetManager, presetValue) {
@@ -244,12 +320,16 @@ function resolvePresetNameFromManager(presetManager, presetValue) {
     return '';
 }
 
-function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'chat') {
+async function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'chat', options = {}) {
     if (!presetName) return {};
     if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
         if (mode !== 'chat') return {};
         const payload = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
         payload.max_tokens = getInternalHelperPresetMaxTokens();
+        const helperMaxContext = getInternalHelperPresetMaxContext();
+        if (helperMaxContext !== null) {
+            payload.openai_max_context = helperMaxContext;
+        }
         return payload;
     }
     if (!presetManager) return {};
@@ -354,83 +434,132 @@ function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'ch
         return payload;
     }
 
-    const payload = {};
-    const allowlist = new Set([
-        'temperature',
-        'top_p',
-        'top_k',
-        'top_a',
-        'min_p',
-        'repetition_penalty',
-        'presence_penalty',
-        'frequency_penalty',
-        'max_tokens',
-        'openai_max_tokens',
-        'stop',
-        'logit_bias',
-        'seed',
-        'n',
-        'response_format',
-        'tool_choice',
-        'tools',
-        'function_call',
-        'functions',
-        'reasoning_effort',
-        'verbosity',
-        'enable_web_search',
-        'request_images',
-        'request_image_aspect_ratio',
-        'request_image_resolution',
-        'extensions',
-        'stream_openai',
-        'prompts',
-        'prompt_order',
-        'names_behavior',
-        'send_if_empty',
-        'bias_preset_selected',
-        'wi_format',
-        'scenario_format',
-        'personality_format',
-        'group_nudge_prompt',
-        'assistant_prefill',
-        'assistant_impersonation',
-        'use_sysprompt',
-        'squash_system_messages',
-        'continue_prefill',
-        'continue_postfix',
-        'continue_nudge_prompt',
-        'new_chat_prompt',
-        'new_group_chat_prompt',
-        'new_example_chat_prompt',
-        'impersonation_prompt',
-    ]);
+    // ---- Chat completion mode ----
+    // Delegate to SillyTavern's own createGenerationParameters so that EVERY
+    // preset setting is honored exactly as in a normal generation: sampler
+    // values, show_thoughts/include_reasoning (the "thinking" toggle),
+    // reasoning_effort, max_context, stream_openai, openai_max_tokens, and all
+    // per-backend parameter cleanup (e.g. Z.ai rejecting
+    // presence_penalty/frequency_penalty/top_k).
+    //
+    // We replicate what ChatCompletionService.presetToGeneratePayload does:
+    // map the preset onto a clone of oai_settings via settingsToUpdate, then
+    // run createGenerationParameters, then strip the fields that
+    // ConnectionManagerRequestService.sendRequest will inject itself
+    // (messages, model, chat_completion_source) so we only override what the
+    // preset actually contributes. We intentionally keep max_tokens and stream
+    // (restored from stream_openai) so a normal generation's settings are
+    // fully honored, since shared.js doesn't read those from the preset.
+    const { messages = [], model } = options;
+    const safeMessages = Array.isArray(messages) && messages.length > 0
+        ? messages
+        : [{ role: 'user', content: '' }];
 
-    const promptKeyPattern = /_prompt$/i;
-    presetKeys.forEach((key) => {
-        if (allowlist.has(key) || promptKeyPattern.test(key)) {
-            payload[key] = preset[key];
-        }
-    });
-
-    const apiKey = (apiId || '').toLowerCase();
-    if (apiKey === 'openai') {
-        if (payload.openai_max_tokens !== undefined && payload.max_tokens === undefined) {
-            payload.max_tokens = payload.openai_max_tokens;
-        }
-        delete payload.openai_max_tokens;
+    const helpers = await getOpenAIPromptManagerHelpers();
+    if (!helpers?.createGenerationParameters || !helpers?.settingsToUpdate || !helpers?.oai_settings) {
+        debugWarn(`[${extensionName}] buildPresetOverridePayload: openai helpers unavailable, falling back to raw preset copy.`);
+        return structuredClone(preset);
     }
 
-    if (payload.seed !== undefined) {
-        const parsedSeed = Number(payload.seed);
-        if (!Number.isInteger(parsedSeed) || parsedSeed < 0) {
-            delete payload.seed;
+    // Map preset values onto a clone of the live oai_settings, exactly like
+    // ChatCompletionService.presetToGeneratePayload does.
+    const settings = structuredClone(helpers.oai_settings);
+    for (const [key, value] of Object.entries(preset)) {
+        const settingToUpdate = helpers.settingsToUpdate[key];
+        if (!settingToUpdate) continue;
+        settings[settingToUpdate[1]] = value;
+    }
+
+    try {
+        const data = await helpers.createGenerationParameters(settings, model, 'quiet', safeMessages);
+        const generateData = data?.generate_data;
+        if (!generateData || typeof generateData !== 'object') {
+            debugWarn(`[${extensionName}] buildPresetOverridePayload: createGenerationParameters returned no generate_data, falling back to raw preset copy.`);
+            return structuredClone(preset);
+        }
+
+        // Strip fields that ConnectionManagerRequestService.sendRequest /
+        // ChatCompletionService.processRequest set themselves from the profile
+        // and explicit args. These are spread BEFORE overridePayload in
+        // shared.js, so if we left them in they would override the profile's
+        // connection settings — we want the profile to own those.
+        const payload = { ...generateData };
+        const profileOwnedKeys = [
+            'type',
+            'messages',
+            'model',
+            'chat_completion_source',
+            'secret_id',
+            'custom_url',
+            'vertexai_region',
+            'vertexai_auth_mode',
+            'vertexai_express_project_id',
+            'zai_endpoint',
+            'siliconflow_endpoint',
+            'minimax_endpoint',
+            'reverse_proxy',
+            'proxy_password',
+            'custom_prompt_post_processing',
+            'azure_base_url',
+            'azure_deployment_name',
+            'azure_api_version',
+            // Model selectors are owned by the profile, not the preset.
+            'openai_model',
+            'claude_model',
+            'openrouter_model',
+            'google_model',
+            'vertexai_model',
+            'zai_model',
+            'xai_model',
+            'groq_model',
+            'deepseek_model',
+            'mistralai_model',
+            'cohere_model',
+            'perplexity_model',
+            'ai21_model',
+            'chutes_model',
+            'siliconflow_model',
+            'minimax_model',
+            'electronhub_model',
+            'nanogpt_model',
+            'aimlapi_model',
+            'pollinations_model',
+            'moonshot_model',
+            'fireworks_model',
+            'cometapi_model',
+            'custom_model',
+            'azure_openai_model',
+            'workers_ai_model',
+            'workers_ai_account_id',
+        ];
+        for (const key of profileOwnedKeys) {
+            delete payload[key];
+        }
+
+        // createGenerationParameters forces stream=false because we pass
+        // type='quiet' (to avoid assistant_prefill for non-impersonate tools).
+        // Restore the preset's real streaming intent so a normal streaming
+        // generation matches what /impersonate etc. would do.
+        if (settings.stream_openai) {
+            payload.stream = true;
         } else {
-            payload.seed = parsedSeed;
+            payload.stream = false;
         }
-    }
 
-    debugLog(`[${extensionName}] buildPresetOverridePayload: payload keys=${Object.keys(payload).join(',')}`);
-    return payload;
+        // shared.js sets max_tokens from its `maxTokens` arg, but for tools
+        // that arg is undefined. The preset always carries the correct value
+        // (openai_max_tokens in the preset maps to max_tokens in generate_data),
+        // so keep it so a normal generation's max_tokens is honored instead of
+        // being dropped to undefined.
+        // createGenerationParameters may emit max_tokens OR max_completion_tokens
+        // (o1/reasoning models) — preserve whichever it produced. They are
+        // already on `payload` since we don't strip them above.
+        debugLog(`[${extensionName}] buildPresetOverridePayload: payload keys=${Object.keys(payload).join(',')} stream=${payload.stream} max_tokens=${payload.max_tokens ?? payload.max_completion_tokens ?? 'unset'}`);
+        return payload;
+    } catch (error) {
+        debugWarn(`[${extensionName}] buildPresetOverridePayload: createGenerationParameters failed, falling back to raw preset copy:`, error);
+        return structuredClone(preset);
+    }
 }
 
 function emitGenerationEvent(context, eventType, payload = {}) {
@@ -496,6 +625,10 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
     if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
         preset = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
         preset.max_tokens = getInternalHelperPresetMaxTokens();
+        const helperMaxContext = getInternalHelperPresetMaxContext();
+        if (helperMaxContext !== null) {
+            preset.openai_max_context = helperMaxContext;
+        }
         if (!includeIdentityContext) {
             preset = stripIdentityPromptsFromHelperPreset(preset);
         }
@@ -679,7 +812,28 @@ export async function requestCompletion({
     }
 
     const presetManager = context?.getPresetManager?.(apiId);
-    const resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
+    let resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
+    let presetFallbackUsed = false;
+
+    // No preset selected for this tool. Try to fall back to a sensible default
+    // so the request actually includes sampler settings (temperature, etc.).
+    // Order: currently active preset (same mode) -> profile-bound preset.
+    // If neither applies, we send the request without a preset and warn the
+    // user, because the request would otherwise ship without any sampler
+    // configuration.
+    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+        const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
+        if (fallbackName) {
+            resolvedPresetName = fallbackName;
+            presetFallbackUsed = true;
+        } else {
+            const toolLabel = debugLabel ? ` (${debugLabel})` : '';
+            showVisibleWarning(
+                `No preset selected${toolLabel} and no matching active/profile preset found. ` +
+                `Sending the request without sampler settings (temperature, etc.) — the backend's defaults will apply.`
+            );
+        }
+    }
 
     if (mode === 'chat') {
         requestData.messages = await buildChatMessagesWithPromptManager(
@@ -706,7 +860,10 @@ export async function requestCompletion({
     }
 
     try {
-        debugLog(`[${extensionName}] requestCompletion: ${mode} request using profile "${resolvedProfileName}", preset "${resolvedPresetName || 'default'}" ${debugLabel ? `(${debugLabel})` : ''}`);
+        const presetNote = presetFallbackUsed
+            ? `, preset "${resolvedPresetName || 'default'}" (auto-fallback)`
+            : `, preset "${resolvedPresetName || 'none (no samplers!)'}"`;
+        debugLog(`[${extensionName}] requestCompletion: ${mode} request using profile "${resolvedProfileName}"${presetNote} ${debugLabel ? `(${debugLabel})` : ''}`);
 
         const abortController = new AbortController();
         setExternalAbortController?.(abortController);
@@ -721,7 +878,13 @@ export async function requestCompletion({
                 signal: abortController.signal,
             };
 
-            const overridePayload = buildPresetOverridePayload(presetManager, resolvedPresetName, apiId, mode);
+            const overridePayload = await buildPresetOverridePayload(
+                presetManager,
+                resolvedPresetName,
+                apiId,
+                mode,
+                { messages: requestData.messages, model: requestData.model }
+            );
             if (Array.isArray(requestData.messages)) {
                 overridePayload.messages = requestData.messages;
             }
