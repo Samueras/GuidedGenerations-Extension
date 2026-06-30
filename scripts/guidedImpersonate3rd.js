@@ -50,6 +50,8 @@ const guidedImpersonate3rd = async () => {
                 presetName: presetValue,
                 prompt: filledPrompt,
                 debugLabel: 'impersonate:3rd',
+                includeChatHistory: true,
+                includeIdentityContext: true,
             });
 
             if (completion && completion.trim() !== '') {

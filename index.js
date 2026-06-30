@@ -202,6 +202,7 @@ export const defaultSettings = {
     persistentGuidesInChatlog: true, // Default on: Show persistent guides in chatlog
     injectionEndRole: 'system', // NEW SETTING: Default role for non-chat injections
     internalHelperPresetMaxTokens: 4000, // Max response tokens for GG Internal Helper Preset
+    internalHelperPresetMaxContext: 0, // Max context tokens for GG Internal Helper Preset (0 = use global value)
     // Profile and Preset settings for each guide
     profileClothes: '', // Profile for Clothes Guide
     presetClothes: INTERNAL_HELPER_PRESET_VALUE,
@@ -531,7 +532,7 @@ async function updateSettingsUI() {
         }
 
         // Populate depth number input fields
-        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe', 'internalHelperPresetMaxTokens'].forEach(key => {
+        ['depthPromptClothes', 'depthPromptState', 'depthPromptThinking', 'depthPromptCustomAuto', 'depthPromptSituational', 'depthPromptRules', 'depthPromptCorrections', 'depthPromptSeparatedThinking', 'depthPromptGuidedResponse', 'depthPromptGuidedSwipe', 'internalHelperPresetMaxTokens', 'internalHelperPresetMaxContext'].forEach(key => {
             const input = document.getElementById(`gg_${key}`);
             if (input) {
                 input.value = extension_settings[extensionName][key] ?? defaultSettings[key] ?? 0; // Default to 0 if undefined

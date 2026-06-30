@@ -8,12 +8,16 @@ import {
     debugLog,
     requestCompletion,
     shouldUseDirectCall,
-    getProfileApiType,
-    getCurrentProfile,
-    extractApiIdFromApiType,
     getPromptValue,
     fillPromptTemplate,
+    generateNewSwipe,
 } from '../persistentGuides/guideExports.js';
+import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
+
+const INJECT_ID = 'separated_thinking';
+const SCRIPT_PROMPT_KEY = 'script_inject_';
+const INJECT_POSITION_CHAT = 1;
+const INJECT_ROLE_SYSTEM = 0;
 
 function getMessageText(messageData) {
     if (!messageData) return '';
@@ -39,57 +43,37 @@ function getCurrentlyShownMessageIndex(context) {
     return context.chat.length - 1;
 }
 
-function resolveCompletionMode(apiType, apiId) {
-    const typeKey = String(apiId || apiType || '').toLowerCase();
-    const textApiIds = new Set([
-        'textgenerationwebui',
-        'kobold',
-        'koboldhorde',
-        'novel',
-        'novelai',
-        'textgen',
-        'text',
-        'llamacpp',
-    ]);
-    return textApiIds.has(typeKey) ? 'text' : 'chat';
+async function applySeparatedThinkingSwipe(context, messageIndex, correctedText) {
+    await appendSwipeToMessage(context, messageIndex, correctedText, {
+        source: 'manual',
+        model: 'Guided Generations',
+    });
 }
 
-async function applySeparatedThinkingSwipe(context, messageIndex, correctedText) {
-    const messageData = context.chat[messageIndex];
-    if (!messageData) return;
-
-    if (!Array.isArray(messageData.swipes)) {
-        messageData.swipes = [messageData.mes];
+// Inject the prompt as an ephemeral extension prompt (a "quiet" prompt) so the
+// native generation sees it without it appearing in the chat log.
+function setTemporaryInjection(context, value) {
+    if (!context.chatMetadata.script_injects) {
+        context.chatMetadata.script_injects = {};
     }
+    context.chatMetadata.script_injects[INJECT_ID] = {
+        value,
+        position: INJECT_POSITION_CHAT,
+        depth: 0,
+        scan: true,
+        role: INJECT_ROLE_SYSTEM,
+        filter: null,
+    };
+    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${INJECT_ID}`, value, INJECT_POSITION_CHAT, 0, true, INJECT_ROLE_SYSTEM);
+    context.saveMetadataDebounced?.();
+}
 
-    messageData.swipes.push(correctedText);
-    messageData.swipe_id = messageData.swipes.length - 1;
-    messageData.mes = correctedText;
-
-    const mesDom = document.querySelector(`#chat .mes[mesid="${messageIndex}"]`);
-    if (mesDom && typeof context.messageFormatting === 'function') {
-        const mesTextElement = mesDom.querySelector('.mes_text');
-        if (mesTextElement) {
-            mesTextElement.innerHTML = context.messageFormatting(
-                messageData.mes,
-                messageData.name,
-                messageData.is_system,
-                messageData.is_user,
-                messageIndex,
-            );
-        }
-        [...mesDom.querySelectorAll('.swipes-counter')].forEach((it) => {
-            it.textContent = `${messageData.swipe_id + 1}/${messageData.swipes.length}`;
-        });
+function flushTemporaryInjection(context) {
+    if (context.chatMetadata?.script_injects) {
+        delete context.chatMetadata.script_injects[INJECT_ID];
     }
-
-    if (context.eventSource && context.event_types) {
-        context.eventSource.emit(context.event_types.MESSAGE_SWIPED, messageIndex);
-    }
-
-    if (typeof context.saveChat === 'function') {
-        await context.saveChat();
-    }
+    context.setExtensionPrompt?.(`${SCRIPT_PROMPT_KEY}${INJECT_ID}`, '', INJECT_POSITION_CHAT, 0, true, INJECT_ROLE_SYSTEM);
+    context.saveMetadataDebounced?.();
 }
 
 export default async function separatedThinking({ suppressAlerts = false } = {}) {
@@ -127,35 +111,39 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
 
     try {
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
-        let correctedText = '';
 
         if (useDirectCall) {
-            correctedText = await requestCompletion({
+            // A profile/preset override is set: generate out-of-band via the
+            // extension's direct LLM call and append the result as a swipe.
+            const correctedText = await requestCompletion({
                 profileName: profileValue,
                 presetName: presetValue,
                 prompt: promptForModel,
                 debugLabel: 'separatedThinking',
                 includeChatHistory: false,
             });
-        } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
-            const effectiveProfile = profileValue || (await getCurrentProfile()) || '';
-            const apiType = await getProfileApiType(effectiveProfile);
-            const apiId = extractApiIdFromApiType(apiType) || apiType;
-            const completionMode = resolveCompletionMode(apiType, apiId);
-            const command = completionMode === 'text' ? '/gen' : '/genraw';
-            const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {
-                showOutput: false,
-                handleExecutionErrors: true,
-            });
-            correctedText = result?.pipe || '';
-        }
 
-        if (!correctedText || !correctedText.trim()) {
-            debugLog('[SeparatedThinking] No corrected text returned; skipping swipe append.');
-            return;
-        }
+            if (!correctedText || !correctedText.trim()) {
+                debugLog('[SeparatedThinking] No corrected text returned; skipping swipe append.');
+                return;
+            }
 
-        await applySeparatedThinkingSwipe(context, messageIndex, correctedText);
+            await applySeparatedThinkingSwipe(context, messageIndex, correctedText);
+        } else {
+            // No override: use the user's currently active settings. Inject the
+            // correction prompt as an ephemeral "quiet" prompt and trigger a
+            // normal ST swipe generation, so the result lands as a proper swipe
+            // with full swipe_info/extra handled by ST itself.
+            setTemporaryInjection(context, promptForModel);
+            try {
+                const ok = await generateNewSwipe();
+                if (!ok) {
+                    debugLog('[SeparatedThinking] Native swipe generation did not complete.');
+                }
+            } finally {
+                flushTemporaryInjection(context);
+            }
+        }
     } catch (error) {
         console.error('[GuidedGenerations][SeparatedThinking] Error:', error);
         if (!suppressAlerts) {

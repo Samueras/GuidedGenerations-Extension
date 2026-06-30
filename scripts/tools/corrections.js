@@ -16,6 +16,7 @@ import {
     activateSendButtons,
     setSendButtonState,
 } from '../persistentGuides/guideExports.js';
+import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
 let lastCorrectionInstruction = '';
 const TEXT_API_IDS = new Set([
@@ -485,12 +486,18 @@ class CorrectionsPopup {
 
             try {
                 if (useDirectCall) {
+                    // Corrections embeds its own chat history directly into the
+                    // prompt template (via {{historyBlock}}), so we pass
+                    // includeChatHistory: false here to avoid duplicating it
+                    // through the prompt manager. Identity context (char/user
+                    // descriptions, scenario, world info) is still attached.
                     correctedText = await requestCompletion({
                         profileName: profileValue,
                         presetName: targetPreset,
                         prompt: promptForModel,
                         debugLabel: 'corrections',
-                        includeChatHistory: this.includeChatHistory,
+                        includeChatHistory: false,
+                        includeIdentityContext: true,
                     });
                 } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
                     const command = this.includeChatHistory ? '/gen' : '/genraw';
@@ -548,40 +555,10 @@ export default async function corrections() {
  * @param {string} stscript - The ST-Script command to execute
  */
 async function applyCorrectionSwipe(context, messageIndex, correctedText) {
-    const messageData = context.chat[messageIndex];
-    if (!messageData) {
-        console.error('[GuidedGenerations][Corrections] Could not find selected message to update.');
-        return;
-    }
-
-    if (!Array.isArray(messageData.swipes)) {
-        messageData.swipes = [messageData.mes];
-    }
-
-    messageData.swipes.push(correctedText);
-    messageData.swipe_id = messageData.swipes.length - 1;
-    messageData.mes = correctedText;
-
-    const mesDom = document.querySelector(`#chat .mes[mesid="${messageIndex}"]`);
-    if (mesDom && typeof context.messageFormatting === 'function') {
-        const mesTextElement = mesDom.querySelector('.mes_text');
-        if (mesTextElement) {
-            mesTextElement.innerHTML = context.messageFormatting(
-                messageData.mes,
-                messageData.name,
-                messageData.is_system,
-                messageData.is_user,
-                messageIndex
-            );
-        }
-        [...mesDom.querySelectorAll('.swipes-counter')].forEach((it) => {
-            it.textContent = `${messageData.swipe_id + 1}/${messageData.swipes.length}`;
-        });
-    }
-
-    if (context.eventSource && context.event_types) {
-        context.eventSource.emit(context.event_types.MESSAGE_SWIPED, messageIndex);
-    }
+    await appendSwipeToMessage(context, messageIndex, correctedText, {
+        source: 'manual',
+        model: 'Guided Generations',
+    });
 
     // Refresh swipe UI (chevrons) so the user can navigate between the
     // original and the new correction swipe. Without this, the back-chevron
@@ -592,10 +569,6 @@ async function applyCorrectionSwipe(context, messageIndex, correctedText) {
         }
     } catch (refreshError) {
         debugLog('[GuidedGenerations][Corrections] Could not refresh swipe buttons:', refreshError);
-    }
-
-    if (typeof context.saveChat === 'function') {
-        await context.saveChat();
     }
 }
 
