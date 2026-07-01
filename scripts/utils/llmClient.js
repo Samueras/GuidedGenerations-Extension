@@ -447,9 +447,11 @@ async function buildPresetOverridePayload(presetManager, presetName, apiId, mode
     // run createGenerationParameters, then strip the fields that
     // ConnectionManagerRequestService.sendRequest will inject itself
     // (messages, model, chat_completion_source) so we only override what the
-    // preset actually contributes. We intentionally keep max_tokens and stream
-    // (restored from stream_openai) so a normal generation's settings are
-    // fully honored, since shared.js doesn't read those from the preset.
+    // preset actually contributes. We keep max_tokens (the preset's response
+    // budget) since shared.js doesn't read it from the preset. stream is left
+    // at false (createGenerationParameters does this for type='quiet') because
+    // the extension's direct-call path consumes the full response via
+    // extractCompletionText, not a streaming generator.
     const { messages = [], model } = options;
     const safeMessages = Array.isArray(messages) && messages.length > 0
         ? messages
@@ -536,15 +538,13 @@ async function buildPresetOverridePayload(presetManager, presetName, apiId, mode
             delete payload[key];
         }
 
-        // createGenerationParameters forces stream=false because we pass
-        // type='quiet' (to avoid assistant_prefill for non-impersonate tools).
-        // Restore the preset's real streaming intent so a normal streaming
-        // generation matches what /impersonate etc. would do.
-        if (settings.stream_openai) {
-            payload.stream = true;
-        } else {
-            payload.stream = false;
-        }
+        // createGenerationParameters sets stream=false because we pass
+        // type='quiet'. We intentionally leave it false: the extension's
+        // direct-call path extracts the complete text after the request
+        // finishes (extractCompletionText), so it cannot consume a streaming
+        // AsyncGenerator. requestCompletion also pins stream=false as a
+        // safety net. (The preset's stream_openai still applies to native
+        // generations and swipes, which go through ST's own UI.)
 
         // shared.js sets max_tokens from its `maxTokens` arg, but for tools
         // that arg is undefined. The preset always carries the correct value
@@ -888,6 +888,13 @@ export async function requestCompletion({
             if (Array.isArray(requestData.messages)) {
                 overridePayload.messages = requestData.messages;
             }
+            // Direct tool calls extract the full text after completion
+            // (extractCompletionText), so we never consume a streaming
+            // AsyncGenerator. Force non-streaming here regardless of the
+            // preset's stream_openai setting; otherwise sendRequest returns
+            // a generator function instead of extracted data and every tool
+            // gets an empty result.
+            overridePayload.stream = false;
             debugLog(`[${extensionName}] requestCompletion: using ConnectionManagerRequestService for profile "${resolvedProfileName}" includePreset=false`);
             emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
             const promptPayload = mode === 'chat' ? requestData.messages : typeof prompt === 'string' ? prompt : '';
