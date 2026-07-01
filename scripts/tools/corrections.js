@@ -172,6 +172,16 @@ class CorrectionsPopup {
             messageTextarea.addEventListener('mouseup', recordSelection);
             messageTextarea.addEventListener('keyup', recordSelection);
             messageTextarea.addEventListener('select', recordSelection);
+            // iOS/Safari: touch-based selection (long-press + drag handles) does
+            // not fire mouseup and fires `select` unreliably. `touchend` covers
+            // the moment the finger lifts after making/extending a selection.
+            messageTextarea.addEventListener('touchend', () => {
+                setTimeout(recordSelection, 50);
+            }, { passive: true });
+            // The reliable cross-platform signal for textarea selection changes is
+            // `selectionchange` on `document` (it does not bubble to the textarea).
+            // This is what actually fires on iPhone while dragging selection handles.
+            this._bindDocumentSelectionChange(messageTextarea);
             // While focused, the native (yellow-tinted) selection is authoritative —
             // hide the overlay so the two never compete.
             messageTextarea.addEventListener('focus', () => {
@@ -298,6 +308,30 @@ class CorrectionsPopup {
         this.hideOverlay();
         const overlay = this.popupElement?.querySelector('#ggCorrectionsMessageOverlay');
         if (overlay) overlay.innerHTML = '';
+    }
+
+    /**
+     * Listen for `selectionchange` on `document`. This event does not bubble
+     * and only fires on the document, but it is the only reliable signal that
+     * the selection inside a textarea changed on iOS/Safari (where `mouseup`
+     * and `select` are unreliable for touch-driven selection-handle drags).
+     */
+    _bindDocumentSelectionChange(textarea) {
+        if (!textarea) return;
+        // Guard against duplicate bindings across re-init.
+        if (this._documentSelectionChangeBound) return;
+        this._documentSelectionChangeBound = true;
+
+        const handler = () => {
+            // Only react when the change involves our message textarea.
+            const active = document.activeElement;
+            if (active !== textarea) return;
+            // selectionchange fires very frequently during a drag; read the
+            // indices directly so recordSelection stays the single source of
+            // truth for what counts as a valid recorded range.
+            this.recordSelection(textarea);
+        };
+        document.addEventListener('selectionchange', handler);
     }
 
     recordSelection(textarea) {
