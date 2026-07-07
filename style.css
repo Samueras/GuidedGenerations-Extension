@@ -727,3 +727,20 @@
         font-size: 0.85em;
     }
 }
+
+/* Version badge in the Guided Generations settings header (top-right) */
+.gg-version-badge {
+    margin-left: auto;
+    margin-right: 8px;
+    padding: 1px 6px;
+    font-size: 0.75em;
+    font-weight: normal;
+    line-height: 1.4;
+    color: var(--SmartThemeBodyColor, #fff);
+    background: var(--black30a, rgba(0, 0, 0, 0.3));
+    border: 1px solid var(--white30a, rgba(255, 255, 255, 0.3));
+    border-radius: 8px;
+    opacity: 0.85;
+    pointer-events: none;
+    user-select: none;
+}

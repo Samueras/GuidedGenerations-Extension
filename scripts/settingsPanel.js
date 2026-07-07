@@ -1,6 +1,6 @@
 // scripts/settingsPanel.js
 
-import { extensionName, loadSettings, updateSettingsUI, addSettingsEventListeners, defaultSettings, debugLog, debugWarn, renderExtensionTemplateAsync, debugProfileSystem } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extensionName, loadSettings, updateSettingsUI, addSettingsEventListeners, defaultSettings, debugLog, debugWarn, renderExtensionTemplateAsync, getExtensionManifest, debugProfileSystem } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const DEFAULT_PROMPTS_URL = 'https://raw.githubusercontent.com/Samueras/GuidedGenerations-Extension/develop/prompts.json';
 const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
@@ -119,6 +119,14 @@ export async function loadSettingsPanel() {
     try {
         const settingsHtml = await renderExtensionTemplateAsync(`third-party/${extensionName}`, 'settings');
         $(container).html(settingsHtml);
+
+            // Populate the version badge from manifest.json (via SillyTavern's loaded manifest)
+            const versionBadge = container.querySelector('#gg_versionBadge');
+            if (versionBadge) {
+                const manifest = getExtensionManifest(extensionName);
+                const version = manifest?.version ?? '';
+                versionBadge.textContent = version ? `v${version}` : 'v?';
+            }
 
             // Remove any manual clear buttons to avoid duplicates
             container.querySelectorAll('.gg-clear-button').forEach(btn => btn.remove());
