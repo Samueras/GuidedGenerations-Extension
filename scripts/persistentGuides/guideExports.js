@@ -133,6 +133,7 @@ const defaultSettings = {
 import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType } from '../utils/presetUtils.js';
 import { requestCompletion, requestStreamingCompletion, requestStreamingDisplay, shouldUseDirectCall } from '../utils/llmClient.js';
 import { getPromptObject, getPromptValue, fillPromptTemplate, expandStMacros, loadPromptCatalog } from '../utils/promptManager.js';
+import { pickGroupMember } from '../utils/groupSelection.js';
 
 // Guide functions
 import situationalGuide from './situationalGuide.js';
@@ -208,6 +209,7 @@ export {
     fillPromptTemplate,
     expandStMacros,
     loadPromptCatalog,
+    pickGroupMember,
     
     // Guides
     runGuideScript,

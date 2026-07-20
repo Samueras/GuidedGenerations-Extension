@@ -781,3 +781,109 @@
         max-height: none;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Group member picker (fallback when STGroupResponderSelector absent) */
+/* ------------------------------------------------------------------ */
+.gg-group-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--SmartThemeShadowColor);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength));
+}
+
+.gg-group-picker-dialog {
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    box-shadow: 0 4px 8px var(--SmartThemeShadowColor);
+    width: min(360px, 92vw);
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 12px 14px 14px;
+}
+
+.gg-group-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.gg-group-picker-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: var(--SmartThemeBodyColor);
+}
+
+.gg-group-picker-close {
+    background: transparent;
+    border: none;
+    color: var(--SmartThemeBodyColor);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.gg-group-picker-close:hover {
+    color: var(--SmartThemeBorderColor);
+}
+
+.gg-group-picker-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gg-group-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.gg-group-picker-item:hover,
+.gg-group-picker-item:focus-visible {
+    background-color: var(--white30a, rgba(255, 255, 255, 0.07));
+    outline: none;
+}
+
+.gg-group-picker-item--muted {
+    opacity: 0.45;
+}
+
+.gg-group-picker-avatar {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    object-position: center;
+    box-shadow: 0 0 5px var(--black50a);
+}
+
+body.square-avatars .gg-group-picker-avatar {
+    border-radius: 2px;
+}
+
+.gg-group-picker-name {
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

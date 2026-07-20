@@ -2,7 +2,7 @@
  * Fun Popup - Handles UI for fun prompts and interactions
  */
 
-import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, expandStMacros } from '../persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, expandStMacros, pickGroupMember } from '../persistentGuides/guideExports.js'; // Import from central hub
 import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
 // Map to store fun prompts loaded from file
@@ -217,38 +217,17 @@ export class FunPopup {
 
         try {
             if (useDirectCall) {
-                // Check if it's a group chat
+                // Check if it's a group chat and, if so, ask the user which
+                // member should respond (via GRS if installed, else GG's own
+                // selector with avatars).
                 let selectedCharacter = '';
                 if (context.groupId) {
-                    let characterList = [];
-                    try {
-                        const groups = context.groups || [];
-                        const currentGroup = groups.find(group => group.id === context.groupId);
-
-                        if (currentGroup && Array.isArray(currentGroup.members)) {
-                            characterList = currentGroup.members.map(member => {
-                                return (typeof member === 'string' && member.toLowerCase().endsWith('.png')) ? member.slice(0, -4) : member;
-                            }).filter(Boolean);
-                        }
-                    } catch (error) {
-                        console.error(`${extensionName}: Error processing group members:`, error);
+                    const picked = await pickGroupMember();
+                    if (!picked) {
+                        debugLog('[FunPopup] Group selection cancelled; aborting fun prompt.');
+                        return;
                     }
-                    if (characterList.length > 0) {
-                        const characterListJson = JSON.stringify(characterList);
-                        const selectionResult = await context.executeSlashCommandsWithOptions(
-                            `/buttons labels=${characterListJson} "Select character to respond"`,
-                            { showOutput: false, handleExecutionErrors: true }
-                        );
-                        const rawSelection = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
-                        // /buttons returns empty string on cancel. Only accept the
-                        // selection if it matches a known character name; otherwise abort.
-                        if (rawSelection && characterList.includes(rawSelection)) {
-                            selectedCharacter = rawSelection;
-                        } else {
-                            debugLog('[FunPopup] Group selection cancelled or invalid; aborting fun prompt.');
-                            return;
-                        }
-                    }
+                    selectedCharacter = picked.name;
                 }
 
                 const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
@@ -302,61 +281,24 @@ export class FunPopup {
             } else {
                 let stscriptCommand = '';
                 if (context.groupId) {
-                    let characterListJson = '[]';
-                    let characterNames = [];
-                    let selectedCharacter = '';
-                    try {
-                        const groups = context.groups || [];
-                        const currentGroup = groups.find(group => group.id === context.groupId);
-
-                        if (currentGroup && Array.isArray(currentGroup.members)) {
-                            characterNames = currentGroup.members.map(member => {
-                                return (typeof member === 'string' && member.toLowerCase().endsWith('.png')) ? member.slice(0, -4) : member;
-                            }).filter(Boolean);
-
-                            if (characterNames.length > 0) {
-                                characterListJson = JSON.stringify(characterNames);
-                            }
-                        }
-                    } catch (error) {
-                        console.error(`${extensionName}: Error processing group members:`, error);
+                    // Ask the user which member should respond (via GRS if
+                    // installed, else GG's own selector with avatars).
+                    const picked = await pickGroupMember();
+                    if (!picked) {
+                        debugLog('[FunPopup] Group selection cancelled; aborting fun prompt.');
+                        return;
                     }
-
-                    if (characterListJson !== '[]') {
-                        const selectionResult = await context.executeSlashCommandsWithOptions(
-                            `/buttons labels=${characterListJson} "Select character to respond"`,
-                            { showOutput: false, handleExecutionErrors: true }
-                        );
-                        const rawSelection = typeof selectionResult?.pipe === 'string' ? selectionResult.pipe.trim() : '';
-                        // /buttons returns empty string on cancel. Only accept the
-                        // selection if it matches a known character name.
-                        if (rawSelection && characterNames.includes(rawSelection)) {
-                            selectedCharacter = rawSelection;
-                        }
-                    }
-
-                    if (selectedCharacter) {
-                        const selectedIndex = characterNames.findIndex(name => name === selectedCharacter);
-                        const shouldUseIndex = /^\d/.test(selectedCharacter) && selectedIndex >= 0;
-                        const triggerArg = shouldUseIndex ? String(selectedIndex) : JSON.stringify(selectedCharacter);
-                        if (shouldUseIndex) {
-                            debugLog(`[FunPopup] Using group member index ${selectedIndex} for numeric-prefixed name.`);
-                        }
-                        const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
-                        // STScript path: leave {{input}} (and other ST macros)
-                        // intact so ST's slash command engine resolves them
-                        // when the /inject runs.
-                        const inputSuffix = inputSuffixTemplate;
-                        stscriptCommand = 
+                    const { triggerArg } = picked;
+                    const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
+                    // STScript path: leave {{input}} (and other ST macros)
+                    // intact so ST's slash command engine resolves them
+                    // when the /inject runs.
+                    const inputSuffix = inputSuffixTemplate;
+                    stscriptCommand =
 `// Group chat logic for Fun Prompt|
 /inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}${inputSuffix}]|
 /trigger await=true ${triggerArg}|
 `;
-                    } else {
-                        // Cancel group fun prompt when selection is cancelled or invalid
-                        debugLog('[FunPopup] Group selection cancelled; aborting fun prompt.');
-                        return;
-                    }
                 } else {
                     // Single character logic
                     const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
