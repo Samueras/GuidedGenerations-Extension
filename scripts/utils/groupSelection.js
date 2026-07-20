@@ -206,7 +206,12 @@ export async function pickGroupMember() {
     if (grs) {
         try {
             debugLog('[GroupSelection] Using STGroupResponderSelector picker.');
-            const picked = await grs.pickCharacter();
+            // Defer the call by one macrotask: GG's button click is still
+            // bubbling at this point, and GRS's outside-click handler would
+            // see the freshly-opened menu and close it immediately. Waiting
+            // one tick lets the originating click finish propagating first.
+            const picked = await new Promise((resolve) => setTimeout(resolve, 0))
+                .then(() => grs.pickCharacter());
             if (!picked || typeof picked.chid !== 'number') {
                 debugLog('[GroupSelection] GRS picker returned no selection.');
                 return null;
