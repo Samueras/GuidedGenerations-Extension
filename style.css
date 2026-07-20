@@ -744,3 +744,40 @@
     pointer-events: none;
     user-select: none;
 }
+
+/*
+ * ST's StreamingDisplay sits at bottom-right using --bottomFormBlockSize, which
+ * only covers the icon row — not GG's action-button bar below the input, and not
+ * a taller textarea. On wide layouts #sheld is a centered column so the panel
+ * peeks out beside the chat. On narrow/full-width layouts the panel ends up
+ * behind #send_form and looks "missing" until you widen the window.
+ *
+ * Anchor it to the top in narrow view so it stays visible above the form.
+ * Also fix last-line clipping: the core panel uses overflow:hidden with nested
+ * vh max-heights that can exceed our shorter narrow max-height — make the
+ * content area the scroll container instead.
+ */
+@media screen and (max-width: 1000px) {
+    .streaming-display {
+        bottom: auto;
+        top: max(calc(var(--topBarBlockSize, 40px) + 8px), 12px);
+        right: 10px;
+        left: 10px;
+        width: auto;
+        max-height: min(55vh, calc(100dvh - var(--topBarBlockSize, 40px) - var(--bottomFormBlockSize, 50px) - 80px));
+        min-height: 0;
+    }
+
+    .streaming-display-content {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding-bottom: 0.4em;
+    }
+
+    .streaming-display-reasoning-content,
+    .streaming-display-text-content {
+        max-height: none;
+    }
+}
