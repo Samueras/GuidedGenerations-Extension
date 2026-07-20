@@ -1,5 +1,5 @@
 // scripts/guidedImpersonate.js
-import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall, getPromptValue, expandStMacros } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const guidedImpersonate = async () => {
     const textarea = document.getElementById('send_textarea');
@@ -35,11 +35,13 @@ const guidedImpersonate = async () => {
     
     debugLog(`[Impersonate-1st] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
     
-    // Use user-defined impersonate prompt override
+    // Use user-defined impersonate prompt override. {{input}} and other ST
+    // macros are resolved by substituteParams via expandStMacros; the textarea
+    // still holds the user's text at this point.
     const promptTemplate = await getPromptValue('promptImpersonate1st', '', {
         settings: extension_settings[extensionName],
     });
-    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
+    const filledPrompt = expandStMacros(promptTemplate);
 
     try {
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

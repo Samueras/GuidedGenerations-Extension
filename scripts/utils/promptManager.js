@@ -3,6 +3,83 @@ const PROMPTS_FILE_PATH = 'scripts/extensions/third-party/GuidedGenerations-Exte
 let promptCatalogPromise = null;
 let promptCatalog = null;
 
+// SillyTavern macros that would have side effects or otherwise misbehave when
+// resolved inside a GuidedGenerations prompt (which may run automatically, on
+// swipes, on corrections, etc.). We strip these out before handing the prompt
+// to ST's substituteParams, so a stray {{setvar}} in a prompt can't mutate
+// chat/global variables or alter token-banning state on every guide run.
+const BLOCKED_ST_MACROS = [
+    // Variable write / mutation macros
+    'setvar', 'setvarkey', 'addvar',
+    'setglobalvar', 'setglobalvarkey', 'addglobalvar',
+    'incvar', 'decvar', 'incglobalvar', 'decglobalvar',
+    'deletevar', 'deleteglobalvar',
+    // Token-banning side effect (Text Completion only, useless in prompt text)
+    'banned',
+    // Original-message substitution; only meaningful in character prompt overrides
+    'original',
+];
+
+// Matches {{macroName}} or {{macroName::arg::...}} or {{macroName arg}}.
+// Captures the macro name in group 1. Whitespace and flags before the name
+// (e.g. "{{ # setvar }}") are tolerated by skipping leading non-word chars.
+const ST_MACRO_PATTERN = /\{\{\s*[!#/?~]*\s*([A-Za-z][\w-]*)\b[^}]*\}\}/g;
+
+// Variable-shorthand operators that perform writes (i.e. side effects).
+// Matches `{{.name = ...}}`, `{{$name++}}`, `{{.name += ...}}`, etc. and
+// consumes the entire macro body up to the closing }}.
+const BLOCKED_SHORTHAND_PATTERN = /\{\{\s*[!#/?~]*\s*[.$]\s*[\w-]+\s*(?:\+\+|--|\+=|-=|\|\|=|\?\?=|=[?|]?)[^}]*\}\}/g;
+
+function stripBlockedStMacros(text) {
+    if (typeof text !== 'string' || text.length === 0) return text;
+
+    const blocked = new Set(BLOCKED_ST_MACROS);
+    const cleaned = text.replace(ST_MACRO_PATTERN, (full, name) => {
+        return blocked.has(name.toLowerCase()) ? '' : full;
+    });
+    return cleaned.replace(BLOCKED_SHORTHAND_PATTERN, '');
+}
+
+/**
+ * Run ST's substituteParams on a prompt, but only after GG's own
+ * fillPromptTemplate has filled its private placeholders ({{input}} is left
+ * for ST to resolve, {{correctionInstruction}}, {{message}}, {{instruction}},
+ * {{pipe}}, {{tracker}}, etc. are filled by GG first) and after stripping any
+ * blocked/side-effecting macros so a guide prompt can't mutate chat state.
+ *
+ * Order: GG fill -> strip blocked -> ST substituteParams.
+ *
+ * @param {string} prompt
+ * @returns {string}
+ */
+export function expandStMacros(prompt) {
+    const ctx = (() => {
+        try {
+            return typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext === 'function'
+                ? SillyTavern.getContext()
+                : null;
+        } catch {
+            return null;
+        }
+    })();
+
+    const text = typeof prompt === 'string' ? prompt : String(prompt ?? '');
+
+    if (!ctx || typeof ctx.substituteParams !== 'function') {
+        // ST context not ready (very early calls). Fall back to a no-op so the
+        // caller still gets a usable string; the only macros that would have
+        // expanded are ST's, which would also have produced literals.
+        return text;
+    }
+
+    try {
+        return ctx.substituteParams(stripBlockedStMacros(text));
+    } catch (error) {
+        console.warn('[GuidedGenerations] substituteParams failed, using raw prompt:', error);
+        return text;
+    }
+}
+
 function getNestedValue(source, keyPath) {
     if (!source || !keyPath) return undefined;
     return String(keyPath).split('.').reduce((current, part) => {

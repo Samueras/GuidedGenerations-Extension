@@ -3,7 +3,7 @@
 /**
  * Edit Guides Popup - Handles UI for editing guide injections.
  */
-import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './guideExports.js'; // Import from central hub
+import { extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate, expandStMacros } from './guideExports.js'; // Import from central hub
 
 export class EditGuidesPopup {
     constructor() {
@@ -272,7 +272,8 @@ export class EditGuidesPopup {
                 }
 
                 const injectionTemplate = await getPromptValue('editGuides.generatedGuideInjection', '');
-                const injectionPrompt = fillPromptTemplate(injectionTemplate, { generatedGuide });
+                // GG fill ({{generatedGuide}}) then ST substituteParams for the rest.
+                const injectionPrompt = expandStMacros(fillPromptTemplate(injectionTemplate, { generatedGuide }));
                 const script = `/inject id=custom_${newName} position=chat scan=true depth=${newDepth} role=${role} ${injectionPrompt} | /listinjects |`;
                 await context.executeSlashCommandsWithOptions(script, { showOutput: false });
                 this.close();

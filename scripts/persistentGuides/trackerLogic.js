@@ -3,7 +3,7 @@
  * @description Handles the automatic execution of trackers based on chat metadata configuration.
  */
 
-import { getContext, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './guideExports.js'; // Import from central hub
+import { getContext, extensionName, debugLog, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate, expandStMacros } from './guideExports.js'; // Import from central hub
 
 /**
  * Executes the tracker logic automatically when triggered
@@ -73,6 +73,11 @@ export async function executeTracker(isAuto = false, force = false) {
                 guidePrompt = `${trackerConfig.guidePrompt}\n\nCurrent Tracker:\n${currentTrackerContent}`;
             }
         }
+
+        // Resolve ST macros ({{char}}, {{user}}, {{input}}, ...) in the user-
+        // authored tracker prompts. Tracker prompts come from chat metadata, so
+        // they may legitimately contain macros.
+        guidePrompt = expandStMacros(guidePrompt);
         
         let guideContent = '';
         const useDetermineDirect = await shouldUseDirectCall(trackerDetermineProfile, trackerDeterminePreset);
@@ -126,7 +131,8 @@ export async function executeTracker(isAuto = false, force = false) {
         }
 
         // Step 2: Generate tracker update using /genraw with the guide content and current tracker as contex
-        const trackerPrompt = `${trackerConfig.trackerPrompt}\n\nLast Update:\n${guideContent}\n\nTracker:\n${currentTrackerContent}`;
+        let trackerPrompt = `${trackerConfig.trackerPrompt}\n\nLast Update:\n${guideContent}\n\nTracker:\n${currentTrackerContent}`;
+        trackerPrompt = expandStMacros(trackerPrompt);
         
         let trackerUpdate = '';
         const useUpdateDirect = await shouldUseDirectCall(trackerUpdateProfile, trackerUpdatePreset);
@@ -163,7 +169,8 @@ export async function executeTracker(isAuto = false, force = false) {
         // Step 3: Update the tracker injection
         if (trackerUpdate && trackerUpdate.trim()) {
             const injectionTemplate = await getPromptValue('tracker.trackerInjection', '');
-            const injectionPrompt = fillPromptTemplate(injectionTemplate, { tracker: trackerUpdate });
+            // GG fill ({{tracker}}) then ST substituteParams for the rest.
+            const injectionPrompt = expandStMacros(fillPromptTemplate(injectionTemplate, { tracker: trackerUpdate }));
             const injectionCommand = `/inject id=tracker position=chat scan=true depth=1 role=system ${injectionPrompt}`;
             await context.executeSlashCommandsWithOptions(injectionCommand, { 
                 showOutput: false, 

@@ -15,6 +15,7 @@ import {
     getPromptObject,
     getPromptValue,
     fillPromptTemplate,
+    expandStMacros,
 } from '../persistentGuides/guideExports.js'; // Import from central hub
 import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
@@ -372,10 +373,10 @@ export class EditIntrosPopup {
 
             const messageToRewrite = context.chat[0]?.mes || '';
             const promptTemplate = await getPromptValue('editIntros.editExisting', '');
-            const promptForModel = fillPromptTemplate(promptTemplate, {
+            const promptForModel = expandStMacros(fillPromptTemplate(promptTemplate, {
                 instruction,
                 messageToRewrite,
-            });
+            }));
 
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
             let updatedIntro = '';
@@ -449,7 +450,7 @@ export class EditIntrosPopup {
             }
 
             const promptTemplate = await getPromptValue('editIntros.makeNew', '');
-            const promptForModel = fillPromptTemplate(promptTemplate, { instruction });
+            const promptForModel = expandStMacros(fillPromptTemplate(promptTemplate, { instruction }));
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
             let newIntro = '';
             if (useDirectCall) {

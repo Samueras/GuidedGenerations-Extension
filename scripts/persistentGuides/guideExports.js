@@ -131,8 +131,8 @@ const defaultSettings = {
 
 // Utility functions
 import { getProfileApiType, getPresetsForApiType, getCurrentProfile, getProfileList, getConnectApiMap, extractApiIdFromApiType } from '../utils/presetUtils.js';
-import { requestCompletion, shouldUseDirectCall } from '../utils/llmClient.js';
-import { getPromptObject, getPromptValue, fillPromptTemplate, loadPromptCatalog } from '../utils/promptManager.js';
+import { requestCompletion, requestStreamingCompletion, requestStreamingDisplay, shouldUseDirectCall } from '../utils/llmClient.js';
+import { getPromptObject, getPromptValue, fillPromptTemplate, expandStMacros, loadPromptCatalog } from '../utils/promptManager.js';
 
 // Guide functions
 import situationalGuide from './situationalGuide.js';
@@ -200,10 +200,13 @@ export {
     getConnectApiMap,
     extractApiIdFromApiType,
     requestCompletion,
+    requestStreamingCompletion,
+    requestStreamingDisplay,
     shouldUseDirectCall,
     getPromptObject,
     getPromptValue,
     fillPromptTemplate,
+    expandStMacros,
     loadPromptCatalog,
     
     // Guides

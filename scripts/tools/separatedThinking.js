@@ -7,12 +7,13 @@ import {
     extensionName,
     debugLog,
     requestCompletion,
+    requestStreamingCompletion,
     shouldUseDirectCall,
     getPromptValue,
     fillPromptTemplate,
+    expandStMacros,
     generateNewSwipe,
 } from '../persistentGuides/guideExports.js';
-import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
 const INJECT_ID = 'separated_thinking';
 const SCRIPT_PROMPT_KEY = 'script_inject_';
@@ -26,14 +27,6 @@ function getMessageText(messageData) {
     return swipes[swipeId] ?? messageData.mes ?? '';
 }
 
-function buildChatHistoryBlock(chat = []) {
-    return chat.map((message, index) => {
-        const role = message?.is_system ? 'system' : message?.is_user ? 'user' : 'assistant';
-        const name = message?.name ? ` ${message.name}` : '';
-        return `[${index + 1}] ${role}${name}: ${getMessageText(message)}`;
-    }).join('\n\n');
-}
-
 function getCurrentlyShownMessageIndex(context) {
     const lastMessageElement = document.querySelector('#chat .mes.last_mes');
     const domMessageId = Number(lastMessageElement?.getAttribute('mesid'));
@@ -44,6 +37,10 @@ function getCurrentlyShownMessageIndex(context) {
 }
 
 async function applySeparatedThinkingSwipe(context, messageIndex, correctedText) {
+    // Kept for fallback paths that need manual swipe append. The streaming
+    // path (requestStreamingCompletion) lets ST's StreamingProcessor create
+    // the swipe itself.
+    const { appendSwipeToMessage } = await import('../utils/swipeHelpers.js');
     await appendSwipeToMessage(context, messageIndex, correctedText, {
         source: 'manual',
         model: 'Guided Generations',
@@ -99,13 +96,16 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
     const profileValue = settings.profileSeparatedThinking ?? '';
     const presetValue = settings.presetSeparatedThinking ?? '';
     const promptTemplate = await getPromptValue('promptSeparatedThinking', '', { settings });
-    const chatHistory = buildChatHistoryBlock(context.chat);
-    const promptForModel = fillPromptTemplate(promptTemplate, {
-        chat: chatHistory,
+    // Chat history is no longer embedded in the prompt via {{chat}}; it is
+    // provided by the selected preset's Chat History marker (the GG Internal
+    // Helper Preset includes it by default, and so does any normal preset).
+    // See buildChatMessagesWithPromptManager in llmClient.js.
+    // {{message}} is GG-private; ST macros like {{char}}/{{user}} are resolved
+    // via expandStMacros after GG's fill runs.
+    const promptForModel = expandStMacros(fillPromptTemplate(promptTemplate, {
         message: targetMessage,
-        input: targetMessage,
         messageIndex: messageIndex + 1,
-    });
+    }));
 
     debugLog(`[SeparatedThinking] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
 
@@ -113,22 +113,27 @@ export default async function separatedThinking({ suppressAlerts = false } = {})
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
 
         if (useDirectCall) {
-            // A profile/preset override is set: generate out-of-band via the
-            // extension's direct LLM call and append the result as a swipe.
-            const correctedText = await requestCompletion({
+            // A profile/preset override is set: generate out-of-band via ST's
+            // native streaming pipeline (StreamingProcessor) so the corrected
+            // text streams live into a new swipe, exactly like a normal ST
+            // generation. The result also lands as a proper swipe with full
+            // swipe_info/extra handled by ST itself.
+            // Per-tool rules: Separated Thinking wants chat history + identity.
+            await requestStreamingCompletion({
                 profileName: profileValue,
                 presetName: presetValue,
                 prompt: promptForModel,
                 debugLabel: 'separatedThinking',
-                includeChatHistory: false,
+                includeChatHistory: true,
+                includeIdentityContext: true,
+                streamType: 'swipe',
+                // Separated Thinking benefits from the model actually thinking
+                // about the correction before answering, so let the streaming
+                // request carry the user's live show_thoughts/reasoning_effort
+                // — even when using the Internal Helper Preset (which has no
+                // reasoning flags of its own).
+                enableReasoning: true,
             });
-
-            if (!correctedText || !correctedText.trim()) {
-                debugLog('[SeparatedThinking] No corrected text returned; skipping swipe append.');
-                return;
-            }
-
-            await applySeparatedThinkingSwipe(context, messageIndex, correctedText);
         } else {
             // No override: use the user's currently active settings. Inject the
             // correction prompt as an ephemeral "quiet" prompt and trigger a

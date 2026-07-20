@@ -2,7 +2,7 @@
  * Fun Popup - Handles UI for fun prompts and interactions
  */
 
-import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, fillPromptTemplate } from '../persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, extensionName, debugLog, requestCompletion, shouldUseDirectCall, generateNewSwipe, getPromptValue, expandStMacros } from '../persistentGuides/guideExports.js'; // Import from central hub
 import { appendSwipeToMessage } from '../utils/swipeHelpers.js';
 
 // Map to store fun prompts loaded from file
@@ -209,10 +209,6 @@ export class FunPopup {
         const presetValue = extension_settings[extensionName]?.[presetKey] ?? '';
         debugLog(`${extensionName}: Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
 
-        // Get the current input from the textarea
-        const textarea = document.getElementById('send_textarea');
-        const currentInput = textarea ? textarea.value.trim() : '';
-
         // Get the configured injection role from settings
         const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
 
@@ -256,7 +252,10 @@ export class FunPopup {
                 }
 
                 const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
-                const promptWithInput = `${filledPrompt}${fillPromptTemplate(inputSuffixTemplate, { input: currentInput })}`;
+                // Direct-call path: bypass slash command engine, so resolve
+                // ST macros (including {{input}}) ourselves. Textarea still
+                // holds the user's text at this point.
+                const promptWithInput = `${filledPrompt}${expandStMacros(inputSuffixTemplate)}`;
                 const responseText = await requestCompletion({
                     profileName: profileValue,
                     presetName: presetValue,
@@ -344,7 +343,10 @@ export class FunPopup {
                             debugLog(`[FunPopup] Using group member index ${selectedIndex} for numeric-prefixed name.`);
                         }
                         const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
-                        const inputSuffix = fillPromptTemplate(inputSuffixTemplate, { input: '{{input}}' });
+                        // STScript path: leave {{input}} (and other ST macros)
+                        // intact so ST's slash command engine resolves them
+                        // when the /inject runs.
+                        const inputSuffix = inputSuffixTemplate;
                         stscriptCommand = 
 `// Group chat logic for Fun Prompt|
 /inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}${inputSuffix}]|
@@ -358,7 +360,10 @@ export class FunPopup {
                 } else {
                     // Single character logic
                     const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
-                    const inputSuffix = fillPromptTemplate(inputSuffixTemplate, { input: '{{input}}' });
+                    // STScript path: leave {{input}} (and other ST macros)
+                    // intact so ST's slash command engine resolves them when
+                    // the /inject runs.
+                    const inputSuffix = inputSuffixTemplate;
                     stscriptCommand = `// Single character logic for Fun Prompt|
 /inject id=instruct position=chat ephemeral=true scan=true depth=0 role=${injectionRole} ${filledPrompt}${inputSuffix}]|
 /trigger await=true|
@@ -393,11 +398,11 @@ export class FunPopup {
         const injectionRole = extension_settings[extensionName]?.injectionEndRole ?? 'system';
         debugLog(`${extensionName}: Swipe using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
 
-        const textarea = document.getElementById('send_textarea');
-        const currentInput = textarea ? textarea.value.trim() : '';
         const filledPrompt = promptText.replace(/\n/g, '\\n'); // Escape newlines for the script
         const inputSuffixTemplate = await getPromptValue('funPrompts.inputSuffix', '');
-        const promptWithInput = `${filledPrompt}${fillPromptTemplate(inputSuffixTemplate, { input: currentInput })}`;
+        // Direct-call path: bypass slash command engine, so resolve ST macros
+        // (including {{input}}) ourselves. Textarea still holds the user's text.
+        const promptWithInput = `${filledPrompt}${expandStMacros(inputSuffixTemplate)}`;
 
         try {
             const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

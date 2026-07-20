@@ -7,11 +7,13 @@ import {
     extensionName,
     debugLog,
     requestCompletion,
+    requestStreamingDisplay,
     shouldUseDirectCall,
     getProfileApiType,
     extractApiIdFromApiType,
     getPromptValue,
     fillPromptTemplate,
+    expandStMacros,
     deactivateSendButtons,
     activateSendButtons,
     setSendButtonState,
@@ -480,7 +482,8 @@ class CorrectionsPopup {
         const promptTemplate = await getPromptValue('promptCorrections', '', {
             settings: extension_settings[extensionName],
         });
-        const filledPrompt = fillPromptTemplate(promptTemplate, { input: instruction });
+        // GG-only placeholder: {{correctionInstruction}} holds the popup
+        // instruction (NOT the chat input). We fill it ourselves below.
 
         const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
         const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
@@ -499,12 +502,14 @@ class CorrectionsPopup {
         const taskTemplate = hasSelection
             ? await getPromptValue('corrections.selectedTextTask', '')
             : await getPromptValue('corrections.fullMessageTask', '');
-        const promptForModel = fillPromptTemplate(taskTemplate, {
-            instruction: filledPrompt,
+        // GG fill first (private placeholders), then ST substituteParams for
+        // {{char}}, {{user}}, {{input}}, etc.
+        const promptForModel = expandStMacros(fillPromptTemplate(taskTemplate, {
+            instruction: fillPromptTemplate(promptTemplate, { correctionInstruction: instruction }),
             historyBlock: historyBlock ? `\n\nEarlier conversation history (oldest first; may be truncated by context limits):\n${historyBlock}\n\n--- End of history ---` : '',
             baseMessage,
             selectedText,
-        });
+        }));
 
         debugLog(`[GuidedGenerations][Corrections] Using profile: ${profileValue || 'current'}, preset: ${targetPreset || 'none'}`);
 
@@ -520,19 +525,38 @@ class CorrectionsPopup {
 
             try {
                 if (useDirectCall) {
-                    // Corrections embeds its own chat history directly into the
-                    // prompt template (via {{historyBlock}}), so we pass
-                    // includeChatHistory: false here to avoid duplicating it
-                    // through the prompt manager. Identity context (char/user
-                    // descriptions, scenario, world info) is still attached.
-                    correctedText = await requestCompletion({
+                    // Corrections builds its correction instruction as a user
+                    // prompt. For TEXT completion there is no prompt manager,
+                    // so chat history is baked into the prompt via
+                    // {{historyBlock}}. For CHAT completion we instead let the
+                    // prompt manager attach real chat history (setOpenAIMessages
+                    // + chatHistory marker) — passing includeChatHistory:this
+                    // lets the user toggle it via the popup checkbox.
+                    //
+                    // Stream the generation into ST's floating StreamingDisplay
+                    // panel so the user can SEE the model's reasoning + the
+                    // corrected text as they arrive. We then compose the final
+                    // swipe text (full message or spliced selection) AFTER the
+                    // stream completes — the chat is never written to by the
+                    // stream itself.
+                    const label = hasSelection
+                        ? 'Correcting selection...'
+                        : 'Correcting message...';
+                    const result = await requestStreamingDisplay({
                         profileName: profileValue,
                         presetName: targetPreset,
                         prompt: promptForModel,
                         debugLabel: 'corrections',
-                        includeChatHistory: false,
+                        includeChatHistory: completionMode === 'chat' && this.includeChatHistory,
                         includeIdentityContext: true,
+                        enableReasoning: true,
+                        displayLabel: label,
+                        completedLabel: 'Corrected',
+                        // Keep the panel open so the user can read the
+                        // reasoning; they close it with the × button.
+                        completeDelay: null,
                     });
+                    correctedText = result?.content ?? '';
                 } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
                     const command = this.includeChatHistory ? '/gen' : '/genraw';
                     const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {

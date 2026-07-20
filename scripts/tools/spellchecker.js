@@ -8,7 +8,7 @@ import {
     requestCompletion,
     shouldUseDirectCall,
     getPromptValue,
-    fillPromptTemplate,
+    expandStMacros,
     setPreviousImpersonateInput,
     deactivateSendButtons,
     activateSendButtons,
@@ -31,11 +31,13 @@ const spellchecker = async () => {
 
     debugLog(`[Spellchecker] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
 
-    // Use user-defined spellchecker prompt override
+    // Use user-defined spellchecker prompt override. {{input}} and other ST
+    // macros are resolved by substituteParams via expandStMacros; the textarea
+    // still holds the user's text at this point.
     const promptTemplate = await getPromptValue('promptSpellchecker', '', {
         settings: extension_settings[extensionName],
     });
-    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
+    const filledPrompt = expandStMacros(promptTemplate);
 
     try {
         const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);

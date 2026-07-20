@@ -1,4 +1,4 @@
-import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, expandStMacros } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const extensionName = "GuidedGenerations-Extension";
 
@@ -73,14 +73,16 @@ const guidedContinue = async () => {
     setPreviousImpersonateInput(originalInputFromTextarea);
 
     // --- Get Setting for prompt template ---
+    // {{input}} and other ST macros are resolved by substituteParams via
+    // expandStMacros; the textarea still holds the user's text at this point.
     const promptTemplate = await getPromptValue('promptGuidedContinue', '', {
         settings: extension_settings[extensionName],
     });
-    let commandParameter = originalInputFromTextarea;
-    if (promptTemplate && promptTemplate.includes('{{input}}')) {
-        commandParameter = fillPromptTemplate(promptTemplate, { input: originalInputFromTextarea });
-    } else if (promptTemplate) {
-        commandParameter = promptTemplate;
+    let commandParameter;
+    if (promptTemplate && promptTemplate.trim()) {
+        commandParameter = expandStMacros(promptTemplate);
+    } else {
+        commandParameter = originalInputFromTextarea;
     }
 
     const stscriptCommand = `/continue await=true ${commandParameter} |`;

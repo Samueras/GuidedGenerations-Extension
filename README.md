@@ -122,7 +122,18 @@ All extension settings are managed via SillyTavern’s Extension Settings panel:
 
 - **Prompt Files and Overrides**: default prompt templates are stored in [`prompts.json`](./prompts.json), so they can be edited outside SillyTavern. By default the extension reads from `prompts.json`. Each prompt in Extension Settings has a **Use prompts.json** checkbox — checked (default) means the file is the source, unchecked means your own saved prompt is used instead. Editing a prompt in settings unchecks that box automatically so your edit takes effect. The settings panel also includes a button to download the default `prompts.json` from GitHub.
 
-  Use `{{input}}` for your input text and other placeholders as supported. Prompt coverage includes:
+  All prompts support SillyTavern's standard macros via `substituteParams`. That means `{{user}}`, `{{char}}`, `{{input}}` (current chat input), `{{time}}`, `{{date}}`, `{{lastMessage}}`, `{{getvar::...}}`, `{{random::...}}`, and every other built-in ST macro work the same way they do in character cards and main prompts. Type `/? macros` in ST for the full list.
+
+  A few GG-specific placeholders are also substituted before ST runs, and are reserved for the prompts that need them:
+
+  - `{{correctionInstruction}}` — the popup instruction entered in the **Corrections** tool (do **not** use `{{input}}` there; in Corrections, `{{input}}` would be the chat input field).
+  - `{{message}}` — the message being corrected (Separated Thinking).
+  - `{{instruction}}`, `{{messageToRewrite}}`, `{{baseMessage}}`, `{{selectedText}}`, `{{historyBlock}}` — internal to Corrections and Edit Intros task wrappers.
+  - `{{pipe}}` (persistent-guide injection wrappers), `{{tracker}}` (tracker injection), `{{generatedGuide}}` (edit-guides injection wrapper).
+
+  To keep guide runs side-effect free, the following ST macros are **stripped** before `substituteParams` runs and will have no effect inside a GG prompt: `{{setvar}}`, `{{setvarkey}}`, `{{addvar}}`, `{{setglobalvar}}`, `{{setglobalvarkey}}`, `{{addglobalvar}}`, `{{incvar}}`, `{{decvar}}`, `{{incglobalvar}}`, `{{decglobalvar}}`, `{{deletevar}}`, `{{deleteglobalvar}}`, `{{banned::...}}`, `{{original}}`, and the variable-shorthand write operators (`.name = ...`, `.name++`, `.name += ...`, `.name ||=`, `.name ??=`, and the global `$` variants). Read-only lookups (`{{getvar}}`, `{{getglobalvar}}`, `{{hasvar}}`, plain `{{.name}}`) still work.
+
+  Prompt coverage includes:
   - Clothes Guide Prompt
   - State Guide Prompt
   - Thinking Guide Prompt

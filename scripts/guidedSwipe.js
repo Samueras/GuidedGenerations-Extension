@@ -1,6 +1,6 @@
 // scripts/guidedSwipe.js
 
-import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, expandStMacros } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Helper function for delays
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -179,14 +179,16 @@ const guidedSwipe = async () => {
         // Save the input state using the shared function (imported)
         setPreviousImpersonateInput(originalInput);
 
-        // Use user-defined guided swipe prompt override
+        // Use user-defined guided swipe prompt override. {{input}} and other ST
+        // macros are resolved by substituteParams via expandStMacros; the
+        // textarea still holds the user's text at this point.
         const promptTemplate = await getPromptValue('promptGuidedSwipe', '', {
             settings: extension_settings[extensionName],
         });
-        const filledPrompt = fillPromptTemplate(promptTemplate, { input: originalInput });
+        const filledPrompt = expandStMacros(promptTemplate);
 
         // --- 1. Store Input & Inject Context (if any) --- (Use direct context method)
-        if (originalInput.trim() || (promptTemplate.trim() !== '' && promptTemplate.trim() !== '{{input}}')) {
+        if (originalInput.trim() || filledPrompt.trim()) {
             // Use the currentInjectionRole retrieved above
             const stscriptCommand = `/inject id=instruct position=chat ephemeral=true scan=true depth=${depth} role=${injectionRole} ${filledPrompt} |`;
             
