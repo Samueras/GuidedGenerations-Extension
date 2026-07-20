@@ -2,14 +2,20 @@
  * @file Group-chat character picker.
  *
  * Centralises how Guided Generations asks the user "which group member
- * should respond next?". Currently this opens GG's own picker popup (small
- * dialog with each member's avatar + name).
+ * should respond next?". If STGroupResponderSelector (GRS) is installed and
+ * exposes its picker API, we delegate to it — that is its whole reason to
+ * exist. Otherwise we fall back to GG's own selector (a small popup that
+ * shows each member with their avatar).
  *
- * Returns a member object pre-tagged with the `/trigger` argument that
- * targets them, or null when the user cancels.
+ * The cross-extension contract is the ST-sanctioned `globalThis.<Name>`
+ * pattern (the same one `globalThis.quickReplyApi` uses):
+ *
+ *     globalThis.STGroupResponderSelector.pickCharacter(): Promise<{chid, name}|null>
+ *
+ * GG only ever consumes that — it never assumes GRS is present.
  */
 
-import { debugLog, getContext } from '../persistentGuides/guideExports.js';
+import { extensionName, debugLog, getContext } from '../persistentGuides/guideExports.js';
 
 /**
  * @typedef GroupMember
@@ -28,6 +34,19 @@ import { debugLog, getContext } from '../persistentGuides/guideExports.js';
  */
 function triggerArgFor(index, name) {
     return /^\d/.test(name) && index >= 0 ? String(index) : JSON.stringify(name);
+}
+
+/**
+ * Look up GRS's published picker, if any.
+ * @returns {{pickCharacter: () => Promise<{chid:number,name:string}|null>}|null}
+ */
+function getGrsPicker() {
+    try {
+        const api = globalThis.STGroupResponderSelector;
+        return api && typeof api.pickCharacter === 'function' ? api : null;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -165,9 +184,14 @@ function ggFallbackPicker(members) {
 }
 
 /**
- * Ask the user which group member should respond next. Opens GG's own
- * selector (each member shown with their avatar). Returns the chosen
- * member (with a ready-to-use `triggerArg`), or null if the user cancelled.
+ * Ask the user which group member should respond next.
+ *
+ * - If STGroupResponderSelector is installed and publishes
+ *   `globalThis.STGroupResponderSelector.pickCharacter`, use it.
+ * - Otherwise open GG's own selector (with avatars).
+ *
+ * Returns the chosen member (with a ready-to-use `triggerArg`), or null if
+ * the user cancelled.
  *
  * @returns {Promise<GroupMember|null>}
  */
@@ -177,5 +201,32 @@ export async function pickGroupMember() {
         debugLog('[GroupSelection] No group members available; picker skipped.');
         return null;
     }
+
+    const grs = getGrsPicker();
+    if (grs) {
+        try {
+            debugLog('[GroupSelection] Using STGroupResponderSelector picker.');
+            const picked = await grs.pickCharacter();
+            if (!picked || typeof picked.chid !== 'number') {
+                debugLog('[GroupSelection] GRS picker returned no selection.');
+                return null;
+            }
+            // Normalise: prefer the locally-built member (it carries the
+            // correct triggerArg, avatar and muted flag). Fall back to a
+            // bare object if GRS reports a chid we don't know about.
+            const matched = members.find(m => m.chid === picked.chid);
+            return matched ?? {
+                chid: picked.chid,
+                name: typeof picked.name === 'string' && picked.name.length ? picked.name : String(picked.chid),
+                avatar: null,
+                muted: false,
+                triggerArg: JSON.stringify(typeof picked.name === 'string' && picked.name.length ? picked.name : String(picked.chid)),
+            };
+        } catch (error) {
+            console.warn(`[${extensionName}] GRS picker threw; falling back to GG selector.`, error);
+        }
+    }
+
+    debugLog('[GroupSelection] Using GG fallback picker.');
     return ggFallbackPicker(members);
 }
