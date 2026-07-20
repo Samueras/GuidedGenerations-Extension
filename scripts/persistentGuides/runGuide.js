@@ -96,7 +96,10 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
                     presetName: presetValue,
                     prompt,
                     debugLabel: `runGuide:${guideId}`,
+                    // Persistent guides want chat history + identity by default.
+                    // Raw mode skips chat history (genraw-equivalent).
                     includeChatHistory: !raw,
+                    includeIdentityContext: true,
                 });
             } else {
                 const asClause = genAs ? `${genAs} ` : '';

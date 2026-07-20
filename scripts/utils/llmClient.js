@@ -124,22 +124,34 @@ const IDENTITY_PROMPT_IDENTIFIERS = new Set([
     'worldInfoBefore',
     'worldInfoAfter',
 ]);
+const CHAT_HISTORY_PROMPT_IDENTIFIER = 'chatHistory';
 
-function stripIdentityPromptsFromHelperPreset(preset) {
+function stripPromptIdentifiersFromHelperPreset(preset, identifiersToStrip) {
     if (!preset || typeof preset !== 'object') return preset;
+    if (!identifiersToStrip || identifiersToStrip.size === 0) return preset;
     const stripped = structuredClone(preset);
     if (Array.isArray(stripped.prompts)) {
-        stripped.prompts = stripped.prompts.filter((p) => p && !IDENTITY_PROMPT_IDENTIFIERS.has(p.identifier));
+        stripped.prompts = stripped.prompts.filter((p) => p && !identifiersToStrip.has(p.identifier));
     }
     if (Array.isArray(stripped.prompt_order)) {
         stripped.prompt_order = stripped.prompt_order.map((entry) => ({
             ...entry,
             order: Array.isArray(entry?.order)
-                ? entry.order.filter((o) => o && !IDENTITY_PROMPT_IDENTIFIERS.has(o.identifier))
+                ? entry.order.filter((o) => o && !identifiersToStrip.has(o.identifier))
                 : entry?.order,
         }));
     }
     return stripped;
+}
+
+function stripIdentityPromptsFromHelperPreset(preset) {
+    return stripPromptIdentifiersFromHelperPreset(preset, IDENTITY_PROMPT_IDENTIFIERS);
+}
+
+// Drops the Chat History marker from the internal helper preset for tools that
+// must not receive the chat log (spellchecker, tracker update, etc.).
+function stripChatHistoryFromHelperPreset(preset) {
+    return stripPromptIdentifiersFromHelperPreset(preset, new Set([CHAT_HISTORY_PROMPT_IDENTIFIER]));
 }
 
 function resolveProfileByNameOrId(profileName, profiles = []) {
@@ -562,6 +574,30 @@ async function buildPresetOverridePayload(presetManager, presetName, apiId, mode
     }
 }
 
+// Adds reasoning/thinking flags to a payload that wouldn't otherwise carry them
+// (notably the Internal Helper Preset, which is a static prompt-only template).
+// Reads the user's live oai_settings via ST context, the same source that
+// createGenerationParameters uses, so streaming requests tell the model to
+// think exactly as a normal generation would.
+//
+// We avoid importing getReasoningEffort (not exported); instead we copy
+// reasoning_effort verbatim. The backend normalizes it per source/model.
+async function mergeReasoningFlags(payload, model = null, options = {}) {
+    const context = getContext();
+    const oaiSettings = context?.chatCompletionSettings;
+    if (!oaiSettings) return payload;
+
+    const { forceShowThoughts = false } = options;
+    const showThoughts = forceShowThoughts ? true : Boolean(oaiSettings.show_thoughts);
+
+    payload.include_reasoning = showThoughts;
+    if (oaiSettings.reasoning_effort !== undefined) {
+        payload.reasoning_effort = oaiSettings.reasoning_effort;
+    }
+    debugLog(`[${extensionName}] mergeReasoningFlags: include_reasoning=${payload.include_reasoning} reasoning_effort=${payload.reasoning_effort ?? 'unset'} model=${model ?? 'unset'}`);
+    return payload;
+}
+
 function emitGenerationEvent(context, eventType, payload = {}) {
     if (!context?.eventSource || !context?.eventTypes?.[eventType]) return;
     try {
@@ -587,7 +623,7 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         return baseMessages || [];
     }
 
-    const { includeIdentityContext = true } = options;
+    const { includeIdentityContext = true, includeChatHistory = true } = options;
     const originalSettings = structuredClone(helpers.oai_settings || {});
 
     // Some persona integrations (e.g. MultiPersonaComposer) merge their
@@ -629,8 +665,15 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         if (helperMaxContext !== null) {
             preset.openai_max_context = helperMaxContext;
         }
+        // Adapt the helper preset per calling tool:
+        // - Spellchecker / tracker update: no identity, no chat history
+        // - Tracker determine: no identity, but keep chat history
+        // - Guides / Separated Thinking / etc.: keep both
         if (!includeIdentityContext) {
             preset = stripIdentityPromptsFromHelperPreset(preset);
+        }
+        if (!includeChatHistory) {
+            preset = stripChatHistoryFromHelperPreset(preset);
         }
     } else {
         preset = getOpenAIPresetByName(helpers, presetName);
@@ -656,7 +699,7 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
         }
 
         helpers.setupChatCompletionPromptManager(helpers.oai_settings);
-        const { prompt = '', includeChatHistory = true } = options;
+        const { prompt = '' } = options;
         const rawPrompt = typeof prompt === 'string' ? prompt.trim() : '';
         let resolvedBaseMessages = baseMessages;
         if (!Array.isArray(resolvedBaseMessages) || resolvedBaseMessages.length === 0) {
@@ -873,18 +916,45 @@ export async function requestCompletion({
         if (canUseConnectionManager) {
             const maxTokens = requestOverrides?.max_tokens ?? requestOverrides?.maxTokens;
             const custom = {
-                includePreset: false,
                 extractData: true,
                 signal: abortController.signal,
             };
 
-            const overridePayload = await buildPresetOverridePayload(
-                presetManager,
-                resolvedPresetName,
-                apiId,
-                mode,
-                { messages: requestData.messages, model: requestData.model }
-            );
+            let overridePayload = {};
+            if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+                // Internal Helper Preset is not saved in ST's preset list, so
+                // ST core cannot look it up by name. Build the payload manually
+                // (same as before) and pass includePreset: false so core doesn't
+                // try to apply the profile's own preset on top.
+                const helperPayload = await buildPresetOverridePayload(
+                    presetManager,
+                    resolvedPresetName,
+                    apiId,
+                    mode,
+                    { messages: requestData.messages, model: requestData.model }
+                );
+                overridePayload = { ...helperPayload };
+                custom.includePreset = false;
+                debugLog(`[${extensionName}] requestCompletion: Internal Helper Preset (manual payload) for profile "${resolvedProfileName}"`);
+            } else if (resolvedPresetName) {
+                // Named preset saved in ST: let core handle preset→payload mapping
+                // via ChatCompletionService.presetToGeneratePayload. This replaces
+                // our manual buildPresetOverridePayload replication.
+                custom.presetName = resolvedPresetName;
+                custom.includePreset = false;
+                debugLog(`[${extensionName}] requestCompletion: named preset "${resolvedPresetName}" via core API for profile "${resolvedProfileName}"`);
+            } else {
+                custom.includePreset = false;
+                debugLog(`[${extensionName}] requestCompletion: no preset, core defaults for profile "${resolvedProfileName}"`);
+            }
+
+            // Merge any caller-provided overrides (minus max_tokens, which goes
+            // through the maxTokens arg so ST core can apply the preset's value).
+            const callerOverrides = { ...requestOverrides };
+            delete callerOverrides.max_tokens;
+            delete callerOverrides.maxTokens;
+            overridePayload = { ...overridePayload, ...callerOverrides };
+
             if (Array.isArray(requestData.messages)) {
                 overridePayload.messages = requestData.messages;
             }
@@ -895,7 +965,6 @@ export async function requestCompletion({
             // a generator function instead of extracted data and every tool
             // gets an empty result.
             overridePayload.stream = false;
-            debugLog(`[${extensionName}] requestCompletion: using ConnectionManagerRequestService for profile "${resolvedProfileName}" includePreset=false`);
             emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
             const promptPayload = mode === 'chat' ? requestData.messages : typeof prompt === 'string' ? prompt : '';
             const result = await connectionManagerService.sendRequest(
@@ -924,6 +993,446 @@ export async function requestCompletion({
         if (originalType) {
             service.TYPE = originalType;
         }
+    }
+}
+
+/**
+ * Streaming variant of requestCompletion.
+ *
+ * Sends the request via ConnectionManagerRequestService.sendRequest with
+ * stream: true and consumes the resulting AsyncGenerator through ST's native
+ * StreamingProcessor, so the corrected text streams live into the chat (as a
+ * new swipe when type='swipe'). Returns the final accumulated text.
+ *
+ * Falls back to non-streaming requestCompletion() when:
+ *   - Connection Manager is unavailable
+ *   - the target profile is not saved (no profile.id)
+ *   - the backend cannot stream (sendStreamedRequest handles this internally)
+ *
+ * @param {object} args - Same shape as requestCompletion's named args.
+ * @param {string} [args.streamType='swipe'] - Generation type passed to StreamingProcessor ('swipe' | 'normal' | 'continue').
+ * @returns {Promise<string>} The final accumulated text (empty string on failure).
+ */
+export async function requestStreamingCompletion({
+    profileName = '',
+    presetName = '',
+    prompt = '',
+    messages = null,
+    requestOverrides = {},
+    optionsOverrides = {},
+    debugLabel = '',
+    includeChatHistory = true,
+    includeIdentityContext = true,
+    streamType = 'swipe',
+    // When true, the streaming payload is always built via
+    // buildPresetOverridePayload → createGenerationParameters so reasoning/
+    // thinking flags (include_reasoning, reasoning_effort, show_thoughts)
+    // are populated from the active oai_settings. Required when the caller
+    // wants reasoning streamed into the chat (e.g. Separated Thinking with
+    // the Internal Helper Preset, which has no reasoning flags of its own).
+    enableReasoning = false,
+} = {}) {
+    const context = getContext();
+    if (!context) {
+        debugWarn(`[${extensionName}] requestStreamingCompletion: Context unavailable ${debugLabel ? `(${debugLabel})` : ''}`);
+        return '';
+    }
+
+    const StreamingProcessor = context?.StreamingProcessor;
+    const setStreamingProcessor = context?.setStreamingProcessor;
+    const connectionManagerService = context?.ConnectionManagerRequestService;
+    if (!StreamingProcessor || typeof setStreamingProcessor !== 'function' || !connectionManagerService?.sendRequest) {
+        debugLog(`[${extensionName}] requestStreamingCompletion: StreamingProcessor API unavailable, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        return requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+    }
+
+    const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+    const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
+
+    let profile = resolveProfileByNameOrId(profileName, profiles);
+    if (!profile && selectedProfileId) {
+        profile = profiles.find((entry) => entry?.id === selectedProfileId) || null;
+    }
+    if (!profile?.id) {
+        debugLog(`[${extensionName}] requestStreamingCompletion: no saved profile selected, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        return requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+    }
+
+    const resolvedProfileName = profile?.name || profileName || selectedProfileId || 'unknown';
+    const apiType = profile.api || (await getProfileApiType(resolvedProfileName));
+    const apiId = extractApiIdFromApiType(apiType) || apiType;
+    const mode = resolveCompletionMode(profile, apiType, apiId);
+
+    if (mode !== 'chat') {
+        debugLog(`[${extensionName}] requestStreamingCompletion: text completion not supported for streaming, falling back ${debugLabel ? `(${debugLabel})` : ''}`);
+        return requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+    }
+
+    const presetManager = context?.getPresetManager?.(apiId);
+    let resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
+
+    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+        const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
+        if (fallbackName) {
+            resolvedPresetName = fallbackName;
+        } else {
+            showVisibleWarning(
+                `No preset selected${debugLabel ? ` (${debugLabel})` : ''} and no matching active/profile preset found. ` +
+                `Sending the request without sampler settings (temperature, etc.) — the backend's defaults will apply.`
+            );
+        }
+    }
+
+    // Build the messages array via the same prompt-manager path as requestCompletion.
+    let chatMessages = Array.isArray(messages) && messages.length > 0 ? messages : null;
+    chatMessages = await buildChatMessagesWithPromptManager(
+        context,
+        chatMessages,
+        resolvedPresetName,
+        { prompt, includeChatHistory, includeIdentityContext },
+    );
+
+    if (!Array.isArray(chatMessages) || chatMessages.length === 0) {
+        const userText = typeof prompt === 'string' ? prompt : '';
+        chatMessages = [{ role: 'user', content: userText }];
+    }
+
+    const custom = {
+        extractData: true,
+        includePreset: false,
+    };
+    let overridePayload = {};
+
+    // When the caller wants reasoning/thinking streamed into the chat
+    // (enableReasoning), the override payload MUST carry include_reasoning /
+    // reasoning_effort / show_thoughts. Those flags are produced by
+    // createGenerationParameters, which buildPresetOverridePayload invokes for
+    // saved presets. The Internal Helper Preset has no reasoning flags of its
+    // own, so we also extend its payload with them when enableReasoning is set.
+    if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+        const helperPayload = await buildPresetOverridePayload(
+            presetManager,
+            resolvedPresetName,
+            apiId,
+            mode,
+            { messages: chatMessages, model: profile.model },
+        );
+        overridePayload = { ...helperPayload };
+        if (enableReasoning) {
+            // Internal Helper Preset is a static prompt-only template; it has no
+            // show_thoughts/reasoning_effort fields, so pull them from the live
+            // oai_settings (same source createGenerationParameters uses).
+            await mergeReasoningFlags(overridePayload, profile.model, { forceShowThoughts: true });
+        }
+    } else if (resolvedPresetName) {
+        if (enableReasoning) {
+            // Named preset + reasoning: build payload via createGenerationParameters
+            // so reasoning flags are populated exactly as in a normal generation.
+            const namedPayload = await buildPresetOverridePayload(
+                presetManager,
+                resolvedPresetName,
+                apiId,
+                mode,
+                { messages: chatMessages, model: profile.model },
+            );
+            overridePayload = { ...namedPayload };
+        } else {
+            // Named preset, no reasoning requirement: let core handle
+            // preset→payload mapping via custom.presetName.
+            custom.presetName = resolvedPresetName;
+        }
+    }
+
+    const callerOverrides = { ...requestOverrides };
+    delete callerOverrides.max_tokens;
+    delete callerOverrides.maxTokens;
+    overridePayload = { ...overridePayload, ...callerOverrides };
+    overridePayload.messages = chatMessages;
+    // Streaming requests must NOT pin stream:false (that would force
+    // sendRequest down its non-streaming branch and return extracted data
+    // instead of an AsyncGenerator). Let the preset/streaming flow decide.
+    if (overridePayload.stream === false) {
+        delete overridePayload.stream;
+    }
+
+    const abortController = new AbortController();
+    setExternalAbortController?.(abortController);
+    setSendButtonState?.(true);
+    deactivateSendButtons?.();
+
+    debugLog(`[${extensionName}] requestStreamingCompletion: streaming ${streamType} via profile "${resolvedProfileName}" preset "${resolvedPresetName || 'none'}" ${debugLabel ? `(${debugLabel})` : ''}`);
+    emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
+
+    // ST's swipe streaming path pre-bumps swipe_id to the new slot BEFORE
+    // generation (see script.js: "If overswiping" → chat[mesId].swipe_id =
+    // newSwipeId where newSwipeId === swipes.length). saveReply's 'swipe'
+    // branch then does swipes.length++ and only writes to the slot at the
+    // current swipe_id; if we leave swipe_id pointing at the old slot, the
+    // new swipe stays empty (and the existing swipe gets overwritten).
+    // We replicate that pre-bump here when streaming into a new swipe.
+    const chatArray = context.chat;
+    const lastMessage = Array.isArray(chatArray) && chatArray.length > 0 ? chatArray[chatArray.length - 1] : null;
+    let preBumpedSwipeId = null;
+    if (streamType === 'swipe' && lastMessage && Array.isArray(lastMessage.swipes) && typeof lastMessage.swipe_id === 'number') {
+        preBumpedSwipeId = lastMessage.swipe_id;
+        lastMessage.swipe_id = lastMessage.swipes.length;
+    }
+
+    let processor = null;
+    try {
+        const response = await connectionManagerService.sendRequest(
+            profile.id,
+            chatMessages,
+            requestOverrides?.max_tokens ?? requestOverrides?.maxTokens,
+            { ...custom, stream: true, signal: abortController.signal },
+            overridePayload,
+        );
+
+        // If the backend didn't stream, sendRequest returns extracted data directly.
+        // Hand it to requestCompletion's text path so the caller sees consistent output.
+        if (typeof response !== 'function') {
+            emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
+            debugLog(`[${extensionName}] requestStreamingCompletion: backend returned non-streaming result ${debugLabel ? `(${debugLabel})` : ''}`);
+            return extractCompletionText(response);
+        }
+
+        processor = new StreamingProcessor(streamType, false);
+        processor.generator = response;
+        setStreamingProcessor(processor);
+
+        const finalText = await processor.generate();
+        if (!processor.isStopped) {
+            await processor.onFinishStreaming(processor.messageId, finalText);
+        }
+        emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
+        return finalText;
+    } catch (error) {
+        emitGenerationEvent(context, 'GENERATION_STOPPED', { source: extensionName });
+        debugWarn(`[${extensionName}] requestStreamingCompletion failed ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+        return '';
+    } finally {
+        if (processor) {
+            setStreamingProcessor(null);
+        }
+        // If streaming failed before saveReply ever ran, the pre-bumped
+        // swipe_id points at a slot that doesn't exist yet. Roll it back so
+        // the user is left looking at the original swipe, not a phantom index.
+        if (preBumpedSwipeId !== null && lastMessage && !processor) {
+            lastMessage.swipe_id = preBumpedSwipeId;
+        }
+        activateSendButtons?.();
+        setSendButtonState?.(false);
+        setExternalAbortController?.(null);
+    }
+}
+
+/**
+ * Streaming variant of requestCompletion that displays live progress in ST's
+ * floating StreamingDisplay panel instead of writing into the chat.
+ *
+ * Designed for tools that need to SHOW the user the model's reasoning and
+ * output as it streams (e.g. Corrections), but then post-process the final
+ * text before saving (e.g. splicing a corrected fragment back into the
+ * original message). The display shows reasoning + content; the chat is not
+ * modified by this call.
+ *
+ * Routes the request through ConnectionManagerRequestService.sendStreamedRequest,
+ * which owns its own stop button, falls back to non-streaming on backend errors,
+ * and returns { content, reasoning }.
+ *
+ * Same fallback rules as requestStreamingCompletion: if Connection Manager,
+ * sendStreamedRequest, or StreamingDisplay are unavailable, or the target
+ * profile is not saved, falls back to non-streaming requestCompletion().
+ *
+ * @param {object} opts - Same shape as requestStreamingCompletion, plus:
+ * @param {string} [opts.displayLabel='Generating...'] Label while generating
+ * @param {string} [opts.completedLabel='Generated'] Label when finished
+ * @param {number|null} [opts.completeDelay=null] ms before the display auto-hides.
+ *        `null` (default) keeps it open until the user closes it — better for
+ *        reading streamed reasoning. Pass a positive number to auto-hide.
+ * @param {boolean} [opts.enableReasoning=true] Whether to populate reasoning flags from live oai_settings.
+ *        Defaults to TRUE here (the whole point of this function is to show thinking).
+ * @returns {Promise<{content: string, reasoning: string}>} Final text + reasoning (empty strings on failure).
+ */
+export async function requestStreamingDisplay({
+    profileName = '',
+    presetName = '',
+    prompt = '',
+    messages = null,
+    requestOverrides = {},
+    optionsOverrides = {},
+    debugLabel = '',
+    includeChatHistory = true,
+    includeIdentityContext = true,
+    enableReasoning = true,
+    displayLabel = 'Generating...',
+    completedLabel = 'Generated',
+    completeDelay = null,
+} = {}) {
+    const context = getContext();
+    if (!context) {
+        debugWarn(`[${extensionName}] requestStreamingDisplay: Context unavailable ${debugLabel ? `(${debugLabel})` : ''}`);
+        return { content: '', reasoning: '' };
+    }
+
+    const connectionManagerService = context?.ConnectionManagerRequestService;
+    const sendStreamedRequest = connectionManagerService?.sendStreamedRequest;
+    const StreamingDisplay = context?.StreamingDisplay;
+    if (typeof sendStreamedRequest !== 'function' || !StreamingDisplay) {
+        debugLog(`[${extensionName}] requestStreamingDisplay: sendStreamedRequest/StreamingDisplay unavailable, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        const text = await requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+        return { content: text, reasoning: '' };
+    }
+
+    const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+    const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
+
+    let profile = resolveProfileByNameOrId(profileName, profiles);
+    if (!profile && selectedProfileId) {
+        profile = profiles.find((entry) => entry?.id === selectedProfileId) || null;
+    }
+    if (!profile?.id) {
+        debugLog(`[${extensionName}] requestStreamingDisplay: no saved profile selected, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        const text = await requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+        return { content: text, reasoning: '' };
+    }
+
+    const resolvedProfileName = profile?.name || profileName || selectedProfileId || 'unknown';
+    const apiType = profile.api || (await getProfileApiType(resolvedProfileName));
+    const apiId = extractApiIdFromApiType(apiType) || apiType;
+    const mode = resolveCompletionMode(profile, apiType, apiId);
+
+    if (mode !== 'chat') {
+        debugLog(`[${extensionName}] requestStreamingDisplay: text completion not supported for streaming display, falling back ${debugLabel ? `(${debugLabel})` : ''}`);
+        const text = await requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel, includeChatHistory, includeIdentityContext,
+        });
+        return { content: text, reasoning: '' };
+    }
+
+    const presetManager = context?.getPresetManager?.(apiId);
+    let resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
+
+    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+        const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
+        if (fallbackName) {
+            resolvedPresetName = fallbackName;
+        } else {
+            showVisibleWarning(
+                `No preset selected${debugLabel ? ` (${debugLabel})` : ''} and no matching active/profile preset found. ` +
+                `Sending the request without sampler settings (temperature, etc.) — the backend's defaults will apply.`
+            );
+        }
+    }
+
+    let chatMessages = Array.isArray(messages) && messages.length > 0 ? messages : null;
+    chatMessages = await buildChatMessagesWithPromptManager(
+        context,
+        chatMessages,
+        resolvedPresetName,
+        { prompt, includeChatHistory, includeIdentityContext },
+    );
+
+    if (!Array.isArray(chatMessages) || chatMessages.length === 0) {
+        const userText = typeof prompt === 'string' ? prompt : '';
+        chatMessages = [{ role: 'user', content: userText }];
+    }
+
+    const custom = {
+        extractData: true,
+        includePreset: false,
+    };
+    let overridePayload = {};
+
+    if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+        const helperPayload = await buildPresetOverridePayload(
+            presetManager,
+            resolvedPresetName,
+            apiId,
+            mode,
+            { messages: chatMessages, model: profile.model },
+        );
+        overridePayload = { ...helperPayload };
+        if (enableReasoning) {
+            await mergeReasoningFlags(overridePayload, profile.model, { forceShowThoughts: true });
+        }
+    } else if (resolvedPresetName) {
+        if (enableReasoning) {
+            const namedPayload = await buildPresetOverridePayload(
+                presetManager,
+                resolvedPresetName,
+                apiId,
+                mode,
+                { messages: chatMessages, model: profile.model },
+            );
+            overridePayload = { ...namedPayload };
+        } else {
+            custom.presetName = resolvedPresetName;
+        }
+    }
+
+    const callerOverrides = { ...requestOverrides };
+    delete callerOverrides.max_tokens;
+    delete callerOverrides.maxTokens;
+    overridePayload = { ...overridePayload, ...callerOverrides };
+    overridePayload.messages = chatMessages;
+    if (overridePayload.stream === false) {
+        delete overridePayload.stream;
+    }
+
+    const abortController = new AbortController();
+    setExternalAbortController?.(abortController);
+    setSendButtonState?.(true);
+    deactivateSendButtons?.();
+
+    debugLog(`[${extensionName}] requestStreamingDisplay: streaming via display, profile "${resolvedProfileName}" preset "${resolvedPresetName || 'none'}" ${debugLabel ? `(${debugLabel})` : ''}`);
+    emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
+
+    try {
+        const result = await sendStreamedRequest.call(
+            connectionManagerService,
+            profile.id,
+            chatMessages,
+            requestOverrides?.max_tokens ?? requestOverrides?.maxTokens,
+            { ...custom, signal: abortController.signal },
+            overridePayload,
+            {
+                showDisplay: true,
+                displayLabel,
+                completedLabel,
+                completeDelay,
+                showStopButton: true,
+            },
+        );
+        emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
+        return {
+            content: result?.content ?? '',
+            reasoning: result?.reasoning ?? '',
+        };
+    } catch (error) {
+        emitGenerationEvent(context, 'GENERATION_STOPPED', { source: extensionName });
+        debugWarn(`[${extensionName}] requestStreamingDisplay failed ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+        return { content: '', reasoning: '' };
+    } finally {
+        activateSendButtons?.();
+        setSendButtonState?.(false);
+        setExternalAbortController?.(null);
     }
 }
 
