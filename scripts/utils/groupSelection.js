@@ -98,22 +98,19 @@ function ggFallbackPicker(members) {
         }
 
         let settled = false;
-        /** @type {null | (() => void)} Cleanup for the resize listener. */
-        let cleanupPosition = null;
+        /** @type {null | (() => void)} Cleanup for listeners attached while open. */
+        let cleanup = null;
         const finish = (value) => {
             if (settled) return;
             settled = true;
-            if (cleanupPosition) cleanupPosition();
-            overlay.remove();
-            document.removeEventListener('keydown', onKeydown);
+            if (cleanup) cleanup();
+            dialog.remove();
             resolve(value);
         };
 
-        const overlay = document.createElement('div');
-        overlay.className = 'gg-group-picker-overlay';
-
         const dialog = document.createElement('div');
         dialog.className = 'gg-group-picker-dialog';
+        dialog.setAttribute('role', 'dialog');
 
         const header = document.createElement('div');
         header.className = 'gg-group-picker-header';
@@ -161,12 +158,19 @@ function ggFallbackPicker(members) {
         }
 
         dialog.append(header, list);
-        overlay.append(dialog);
+        document.body.append(dialog);
 
-        // Click on backdrop (not dialog) cancels.
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) finish(null);
-        });
+        // Close on outside click. Ignore clicks inside the dialog, and ignore
+        // the originating click that opened the picker (still propagating).
+        let suppressNextClick = true;
+        setTimeout(() => { suppressNextClick = false; }, 0);
+        const onDocumentClick = (e) => {
+            if (suppressNextClick) return;
+            if (!dialog.contains(/** @type {Node} */ (e.target))) {
+                finish(null);
+            }
+        };
+        document.addEventListener('click', onDocumentClick);
 
         /** @param {KeyboardEvent} e */
         const onKeydown = (e) => {
@@ -177,34 +181,40 @@ function ggFallbackPicker(members) {
         };
         document.addEventListener('keydown', onKeydown);
 
-        document.body.append(overlay);
-        // Anchor the dialog at the same vertical position as GG's tools
-        // menu: just above the GG action-button row (#gg-action-button-
-        // container), so it floats over the textarea instead of sitting at
-        // the very bottom of the screen. Falls back to #send_form's top
-        // (i.e. above the whole input form) if the action container isn't
-        // present, and finally to a small gap from the viewport bottom.
+        // Position the dialog like GG's tools menu: its bottom edge sits a
+        // few px above #gg-action-button-container (the GG button row), so it
+        // floats over the textarea instead of being glued to the screen
+        // bottom. Horizontally centered in the viewport. Falls back to
+        // #send_form's top, then to a small gap from the viewport bottom.
         const updatePosition = () => {
             const actionContainer = document.getElementById('gg-action-button-container');
             const sendForm = document.getElementById('send_form');
             const anchorEl = actionContainer || sendForm;
             const gap = 5;
+            let bottomPx;
             if (anchorEl) {
-                // Place the dialog's bottom edge `gap` px above the anchor's
-                // top edge. Distance from viewport bottom =
-                // window.innerHeight - anchorEl.top.
                 const anchorTop = anchorEl.getBoundingClientRect().top;
-                dialog.style.bottom = `${window.innerHeight - anchorTop + gap}px`;
+                bottomPx = window.innerHeight - anchorTop + gap;
             } else {
-                dialog.style.bottom = `${gap}px`;
+                bottomPx = gap;
             }
+            dialog.style.bottom = `${bottomPx}px`;
+            dialog.style.left = '50%';
+            dialog.style.transform = 'translateX(-50%)';
         };
         updatePosition();
         window.addEventListener('resize', updatePosition);
-        cleanupPosition = () => window.removeEventListener('resize', updatePosition);
-        // Re-measure once the overlay is laid out, in case fonts/images shift
+
+        cleanup = () => {
+            document.removeEventListener('click', onDocumentClick);
+            document.removeEventListener('keydown', onKeydown);
+            window.removeEventListener('resize', updatePosition);
+        };
+
+        // Re-measure once the dialog is laid out, in case fonts/images shift
         // the anchor height on the same frame.
         requestAnimationFrame(updatePosition);
+
         // Focus the first item so keyboard users can pick immediately.
         const firstItem = list.querySelector('.gg-group-picker-item');
         if (firstItem && typeof firstItem.focus === 'function') {
