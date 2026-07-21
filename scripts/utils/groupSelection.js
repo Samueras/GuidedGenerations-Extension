@@ -98,9 +98,12 @@ function ggFallbackPicker(members) {
         }
 
         let settled = false;
+        /** @type {null | (() => void)} Cleanup for the resize listener. */
+        let cleanupPosition = null;
         const finish = (value) => {
             if (settled) return;
             settled = true;
+            if (cleanupPosition) cleanupPosition();
             overlay.remove();
             document.removeEventListener('keydown', onKeydown);
             resolve(value);
@@ -175,6 +178,22 @@ function ggFallbackPicker(members) {
         document.addEventListener('keydown', onKeydown);
 
         document.body.append(overlay);
+        // Anchor the dialog just above the input form (#send_form), centered
+        // horizontally. We measure the form's height dynamically because it
+        // varies by layout (mobile, waifu mode, multi-line textarea, etc.)
+        // and update it on resize. When the form can't be found, fall back
+        // to a small gap from the bottom of the viewport.
+        const sendForm = document.getElementById('send_form');
+        const updatePosition = () => {
+            const formHeight = sendForm ? sendForm.getBoundingClientRect().height : 0;
+            dialog.style.bottom = `${formHeight + 8}px`;
+        };
+        updatePosition();
+        window.addEventListener('resize', updatePosition);
+        cleanupPosition = () => window.removeEventListener('resize', updatePosition);
+        // Re-measure once the overlay is laid out, in case fonts/images shift
+        // the form height on the same frame.
+        requestAnimationFrame(updatePosition);
         // Focus the first item so keyboard users can pick immediately.
         const firstItem = list.querySelector('.gg-group-picker-item');
         if (firstItem && typeof firstItem.focus === 'function') {

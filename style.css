@@ -753,7 +753,11 @@
     inset: 0;
     z-index: 100000;
     display: flex;
-    align-items: center;
+    /* Anchor to the bottom so the dialog floats above the input form
+       instead of vertically centering (which can push the dialog's top
+       off-screen on short / mobile layouts). The dialog's `bottom` is set
+       dynamically by groupSelection.js to match #send_form's height. */
+    align-items: flex-end;
     justify-content: center;
     background-color: var(--SmartThemeShadowColor);
     backdrop-filter: blur(var(--SmartThemeBlurStrength));
@@ -766,9 +770,16 @@
     border-radius: 10px;
     box-shadow: 0 4px 8px var(--SmartThemeShadowColor);
     width: min(360px, 92vw);
-    max-height: 80vh;
+    /* Cap height so the dialog never fills the whole viewport; remaining
+       overflow scrolls inside the list. */
+    max-height: 60vh;
     overflow-y: auto;
     padding: 12px 14px 14px;
+    /* CSS fallback bottom (small gap); JS overrides with form height + gap. */
+    bottom: 8px;
+    /* Small entrance cushion so it doesn't hug the very bottom edge on
+       layouts where #send_form isn't found. */
+    margin-bottom: 0;
 }
 
 .gg-group-picker-header {
