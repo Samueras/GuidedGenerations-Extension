@@ -178,21 +178,32 @@ function ggFallbackPicker(members) {
         document.addEventListener('keydown', onKeydown);
 
         document.body.append(overlay);
-        // Anchor the dialog just above the input form (#send_form), centered
-        // horizontally. We measure the form's height dynamically because it
-        // varies by layout (mobile, waifu mode, multi-line textarea, etc.)
-        // and update it on resize. When the form can't be found, fall back
-        // to a small gap from the bottom of the viewport.
-        const sendForm = document.getElementById('send_form');
+        // Anchor the dialog at the same vertical position as GG's tools
+        // menu: just above the GG action-button row (#gg-action-button-
+        // container), so it floats over the textarea instead of sitting at
+        // the very bottom of the screen. Falls back to #send_form's top
+        // (i.e. above the whole input form) if the action container isn't
+        // present, and finally to a small gap from the viewport bottom.
         const updatePosition = () => {
-            const formHeight = sendForm ? sendForm.getBoundingClientRect().height : 0;
-            dialog.style.bottom = `${formHeight + 8}px`;
+            const actionContainer = document.getElementById('gg-action-button-container');
+            const sendForm = document.getElementById('send_form');
+            const anchorEl = actionContainer || sendForm;
+            const gap = 5;
+            if (anchorEl) {
+                // Place the dialog's bottom edge `gap` px above the anchor's
+                // top edge. Distance from viewport bottom =
+                // window.innerHeight - anchorEl.top.
+                const anchorTop = anchorEl.getBoundingClientRect().top;
+                dialog.style.bottom = `${window.innerHeight - anchorTop + gap}px`;
+            } else {
+                dialog.style.bottom = `${gap}px`;
+            }
         };
         updatePosition();
         window.addEventListener('resize', updatePosition);
         cleanupPosition = () => window.removeEventListener('resize', updatePosition);
         // Re-measure once the overlay is laid out, in case fonts/images shift
-        // the form height on the same frame.
+        // the anchor height on the same frame.
         requestAnimationFrame(updatePosition);
         // Focus the first item so keyboard users can pick immediately.
         const firstItem = list.querySelector('.gg-group-picker-item');
