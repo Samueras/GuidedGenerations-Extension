@@ -785,25 +785,21 @@
 /* ------------------------------------------------------------------ */
 /* Group member picker (fallback when STGroupResponderSelector absent) */
 /* ------------------------------------------------------------------ */
-.gg-group-picker-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 100000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--SmartThemeShadowColor);
-    backdrop-filter: blur(var(--SmartThemeBlurStrength));
-}
-
 .gg-group-picker-dialog {
+    position: fixed;
+    z-index: 100000;
     background-color: var(--SmartThemeBlurTintColor);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 10px;
     box-shadow: 0 4px 8px var(--SmartThemeShadowColor);
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    backdrop-filter: blur(var(--SmartThemeBlurStrength));
     width: min(360px, 92vw);
-    max-height: 80vh;
+    /* Cap height so the dialog never fills the whole viewport; remaining
+       overflow scrolls inside the list. Bottom is set dynamically by
+       groupSelection.js to float above the GG action-button row. */
+    max-height: 60vh;
     overflow-y: auto;
     padding: 12px 14px 14px;
 }
