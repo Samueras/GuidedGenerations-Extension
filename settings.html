@@ -191,7 +191,7 @@
                 <details class="gg-collapsible-section">
                     <summary>
                         <h4>Preset Usage</h4>
-                        <small class="setting_item_description">Assign a profile and preset baseline to each Guided Generation action. The extension now applies selected profile/preset behavior internally per request (without globally switching your active profile). Select <code>GG Internal Helper Preset</code> to use the built-in helper-oriented prompt/tokens override while keeping your current profile context and model settings as baseline. Select <code>None</code> if you want to run with your currently active preset behavior only.</small>
+                        <small class="setting_item_description">Assign a profile and preset baseline to each Guided Generation action. The extension now applies selected profile/preset behavior internally per request (without globally switching your active profile). Select <code>GG Internal Helper Preset (streaming)</code> to use the built-in helper-oriented prompt/tokens override and stream the response through the tool's normal streaming path (e.g. live StreamingDisplay for Corrections). Select <code>GG Internal Helper Preset (non-streaming)</code> for the same payload but silent, non-streamed completion — useful for backends that misbehave when streaming or when you don't want the live display. Select <code>None</code> if you want to run with your currently active preset behavior only.</small>
                     </summary>
                 
                 <!-- Profile System Controls -->

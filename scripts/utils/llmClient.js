@@ -25,6 +25,24 @@ const TEXT_API_IDS = new Set([
     'llamacpp',
 ]);
 const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
+// Same payload as INTERNAL_HELPER_PRESET_VALUE, but requests non-streaming
+// routing even when the caller would normally stream (e.g. Corrections via
+// requestStreamingDisplay, Separated Thinking via requestStreamingCompletion).
+// Both sentinels build the same Internal Helper Preset payload — only the
+// streaming/display routing differs.
+const INTERNAL_HELPER_PRESET_NONSTREAM_VALUE = '__GG_INTERNAL_HELPER_NONSTREAM__';
+
+/**
+ * True when `presetName` refers to either Internal Helper Preset variant
+ * (streaming or non-streaming). Use this everywhere the two variants should
+ * be treated identically (payload, fallback detection, etc.). The routing
+ * decision (stream vs not) is made at the top of requestStreamingCompletion
+ * / requestStreamingDisplay, which check the specific sentinel.
+ */
+function isInternalHelperPreset(presetName) {
+    return presetName === INTERNAL_HELPER_PRESET_VALUE
+        || presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE;
+}
 const INTERNAL_HELPER_PRESET_DEFAULT_MAX_TOKENS = 4000;
 const INTERNAL_HELPER_PRESET_CHAT_OVERRIDES = {
     prompts: [
@@ -291,7 +309,7 @@ function resolvePresetNameFromManager(presetManager, presetValue) {
     if (!presetValue) return '';
     const presetName = normalizePresetName(presetValue);
     if (!presetName) return '';
-    if (presetName === INTERNAL_HELPER_PRESET_VALUE) return presetName;
+    if (isInternalHelperPreset(presetName)) return presetName;
     if (!presetManager) return '';
 
     debugLog(`[${extensionName}] resolvePresetNameFromManager: input="${presetName}" manager=${!!presetManager}`);
@@ -334,7 +352,7 @@ function resolvePresetNameFromManager(presetManager, presetValue) {
 
 async function buildPresetOverridePayload(presetManager, presetName, apiId, mode = 'chat', options = {}) {
     if (!presetName) return {};
-    if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
+    if (isInternalHelperPreset(presetName)) {
         if (mode !== 'chat') return {};
         const payload = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
         payload.max_tokens = getInternalHelperPresetMaxTokens();
@@ -658,7 +676,7 @@ async function buildChatMessagesWithPromptManager(context, baseMessages, presetN
     }
 
     let preset = null;
-    if (presetName === INTERNAL_HELPER_PRESET_VALUE) {
+    if (isInternalHelperPreset(presetName)) {
         preset = structuredClone(INTERNAL_HELPER_PRESET_CHAT_OVERRIDES);
         preset.max_tokens = getInternalHelperPresetMaxTokens();
         const helperMaxContext = getInternalHelperPresetMaxContext();
@@ -771,7 +789,7 @@ export async function shouldUseDirectCall(profileName = '', presetName = '') {
     const context = getContext();
     if (!context) return false;
 
-    if (targetPreset && targetPreset !== INTERNAL_HELPER_PRESET_VALUE) {
+    if (targetPreset && !isInternalHelperPreset(targetPreset)) {
         const apiType = await getProfileApiType(targetProfile || (await getCurrentProfile()));
         const apiId = extractApiIdFromApiType(apiType) || apiType;
         const presetManager = context?.getPresetManager?.(apiId);
@@ -782,7 +800,7 @@ export async function shouldUseDirectCall(profileName = '', presetName = '') {
             debugWarn(`[${extensionName}] Preset "${targetPreset}" not found for api "${apiId}", using default call.`);
             return false;
         }
-    } else if (targetPreset === INTERNAL_HELPER_PRESET_VALUE) {
+    } else if (isInternalHelperPreset(targetPreset)) {
         const apiType = await getProfileApiType(targetProfile || (await getCurrentProfile()));
         const apiId = extractApiIdFromApiType(apiType) || apiType;
         if (TEXT_API_IDS.has((apiId || '').toLowerCase())) {
@@ -864,7 +882,7 @@ export async function requestCompletion({
     // If neither applies, we send the request without a preset and warn the
     // user, because the request would otherwise ship without any sampler
     // configuration.
-    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+    if (!resolvedPresetName && !isInternalHelperPreset(presetName)) {
         const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
         if (fallbackName) {
             resolvedPresetName = fallbackName;
@@ -921,7 +939,7 @@ export async function requestCompletion({
             };
 
             let overridePayload = {};
-            if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+            if (isInternalHelperPreset(resolvedPresetName)) {
                 // Internal Helper Preset is not saved in ST's preset list, so
                 // ST core cannot look it up by name. Build the payload manually
                 // (same as before) and pass includePreset: false so core doesn't
@@ -1038,6 +1056,19 @@ export async function requestStreamingCompletion({
         return '';
     }
 
+    // Internal Helper Preset (non-streaming variant): the user explicitly
+    // opted out of streaming for this tool. Route through the silent
+    // requestCompletion path instead of StreamingProcessor. The preset
+    // payload is identical — only the transport differs.
+    if (presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE) {
+        debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming Helper Preset, delegating to requestCompletion ${debugLabel ? `(${debugLabel})` : ''}`);
+        return requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel: debugLabel ? `${debugLabel} (non-stream)` : 'non-stream',
+            includeChatHistory, includeIdentityContext,
+        });
+    }
+
     const StreamingProcessor = context?.StreamingProcessor;
     const setStreamingProcessor = context?.setStreamingProcessor;
     const connectionManagerService = context?.ConnectionManagerRequestService;
@@ -1080,7 +1111,7 @@ export async function requestStreamingCompletion({
     const presetManager = context?.getPresetManager?.(apiId);
     let resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
 
-    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+    if (!resolvedPresetName && !isInternalHelperPreset(presetName)) {
         const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
         if (fallbackName) {
             resolvedPresetName = fallbackName;
@@ -1118,7 +1149,7 @@ export async function requestStreamingCompletion({
     // createGenerationParameters, which buildPresetOverridePayload invokes for
     // saved presets. The Internal Helper Preset has no reasoning flags of its
     // own, so we also extend its payload with them when enableReasoning is set.
-    if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+    if (isInternalHelperPreset(resolvedPresetName)) {
         const helperPayload = await buildPresetOverridePayload(
             presetManager,
             resolvedPresetName,
@@ -1284,6 +1315,20 @@ export async function requestStreamingDisplay({
         return { content: '', reasoning: '' };
     }
 
+    // Internal Helper Preset (non-streaming variant): the user explicitly
+    // opted out of streaming for this tool. Skip the StreamingDisplay panel
+    // entirely and wait silently for the full response. Preset payload is
+    // identical — only the transport differs.
+    if (presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE) {
+        debugLog(`[${extensionName}] requestStreamingDisplay: non-streaming Helper Preset, delegating to requestCompletion ${debugLabel ? `(${debugLabel})` : ''}`);
+        const text = await requestCompletion({
+            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+            debugLabel: debugLabel ? `${debugLabel} (non-stream)` : 'non-stream',
+            includeChatHistory, includeIdentityContext,
+        });
+        return { content: text, reasoning: '' };
+    }
+
     const connectionManagerService = context?.ConnectionManagerRequestService;
     const sendStreamedRequest = connectionManagerService?.sendStreamedRequest;
     const StreamingDisplay = context?.StreamingDisplay;
@@ -1329,7 +1374,7 @@ export async function requestStreamingDisplay({
     const presetManager = context?.getPresetManager?.(apiId);
     let resolvedPresetName = resolvePresetNameFromManager(presetManager, presetName);
 
-    if (!resolvedPresetName && presetName !== INTERNAL_HELPER_PRESET_VALUE) {
+    if (!resolvedPresetName && !isInternalHelperPreset(presetName)) {
         const fallbackName = await resolveFallbackPresetName(context, presetManager, apiId, mode, profile);
         if (fallbackName) {
             resolvedPresetName = fallbackName;
@@ -1360,7 +1405,7 @@ export async function requestStreamingDisplay({
     };
     let overridePayload = {};
 
-    if (resolvedPresetName === INTERNAL_HELPER_PRESET_VALUE) {
+    if (isInternalHelperPreset(resolvedPresetName)) {
         const helperPayload = await buildPresetOverridePayload(
             presetManager,
             resolvedPresetName,

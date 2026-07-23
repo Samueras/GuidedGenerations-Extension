@@ -51,6 +51,7 @@ export const extensionName = "GuidedGenerations-Extension"; // Use the simple na
 
 let isSending = false;
 const INTERNAL_HELPER_PRESET_VALUE = '__GG_INTERNAL_HELPER__';
+const INTERNAL_HELPER_PRESET_NONSTREAM_VALUE = '__GG_INTERNAL_HELPER_NONSTREAM__';
 
 // Debug message capture array - only populated when debug mode is enabled
 let debugMessages = [];
@@ -813,10 +814,23 @@ function populatePresetDropdownWithList(presetSelect, presetList) {
     ]);
     const guideKey = (presetSelect?.name || presetSelect?.id || '').replace(/^preset/, '');
     if (guideKey && INTERNAL_HELPER_ELIGIBLE_GUIDES.has(guideKey)) {
+        // Streaming variant: behaves exactly like the Internal Helper Preset
+        // has always behaved — callers route it through whatever streaming
+        // path they normally use (StreamingDisplay for Corrections,
+        // StreamingProcessor for Separated Thinking, etc.). This is the
+        // default for new installs and migrated users.
         const internalOption = document.createElement('option');
         internalOption.value = INTERNAL_HELPER_PRESET_VALUE;
-        internalOption.textContent = 'GG Internal Helper Preset';
+        internalOption.textContent = 'GG Internal Helper Preset (streaming)';
         presetSelect.appendChild(internalOption);
+
+        // Non-streaming variant: identical preset payload, but streaming
+        // callers transparently fall back to requestCompletion — the
+        // response is awaited silently with no live StreamingDisplay panel.
+        const internalOptionNonStream = document.createElement('option');
+        internalOptionNonStream.value = INTERNAL_HELPER_PRESET_NONSTREAM_VALUE;
+        internalOptionNonStream.textContent = 'GG Internal Helper Preset (non-streaming)';
+        presetSelect.appendChild(internalOptionNonStream);
     }
     
     // Check if presetList is valid
