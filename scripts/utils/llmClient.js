@@ -1090,10 +1090,25 @@ async function nonStreamingFallbackWithSwipe(context, args) {
     });
 
     if (streamType === 'swipe' && content && Array.isArray(context?.chat) && context.chat.length > 0) {
+        const lastMessage = context.chat[context.chat.length - 1];
+
+        // Pre-bump swipe_id to the new slot BEFORE saveReply. ST's saveReply
+        // increments swipes.length, then writes the content only if swipe_id
+        // already points at the new slot (otherwise it just mutates .mes
+        // without switching the visible swipe — leaving the new swipe empty
+        // and the user stuck on the old one). This mirrors what ST's own
+        // streaming swipe path does. See script.js saveReply() 'swipe' branch.
+        let preBumpedSwipeId = null;
+        if (Array.isArray(lastMessage.swipes) && typeof lastMessage.swipe_id === 'number'
+            && lastMessage.swipe_id !== lastMessage.swipes.length) {
+            preBumpedSwipeId = lastMessage.swipe_id;
+            lastMessage.swipe_id = lastMessage.swipes.length;
+        }
+
         try {
             // Delegate to ST's native swipe-write path. saveReply({type:'swipe'})
-            // increments swipes.length, writes the new slot, sets swipe_id, fills
-            // extra.reasoning, refreshes the DOM, fires MESSAGE_SWIPED, and saves.
+            // increments swipes.length, writes the new slot, fills extra.reasoning,
+            // refreshes the DOM, fires MESSAGE_SWIPED/MESSAGE_RECEIVED, and saves.
             const { type, getMessage } = await saveReply({
                 type: 'swipe',
                 getMessage: content,
@@ -1103,6 +1118,10 @@ async function nonStreamingFallbackWithSwipe(context, args) {
             return typeof getMessage === 'string' ? getMessage : content;
         } catch (error) {
             debugWarn(`[${extensionName}] requestStreamingCompletion: saveReply failed, falling back to manual swipe append ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+            // Roll back the pre-bump so the manual fallback sees the original state.
+            if (preBumpedSwipeId !== null && lastMessage) {
+                lastMessage.swipe_id = preBumpedSwipeId;
+            }
             try {
                 const messageIndex = context.chat.length - 1;
                 const { appendSwipeToMessage } = await import('./swipeHelpers.js');
