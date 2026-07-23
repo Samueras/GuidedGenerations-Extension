@@ -1015,6 +1015,43 @@ export async function requestCompletion({
 }
 
 /**
+ * Run a non-streaming requestCompletion on behalf of requestStreamingCompletion
+ * and (when the caller asked for a new swipe) append the result as a swipe to
+ * the last chat message. StreamingProcessor would have created the swipe itself
+ * in the streaming path — this helper mirrors that for the non-streaming
+ * fallback so the caller-visible behavior is identical.
+ *
+ * Returns the final text (same contract as requestStreamingCompletion).
+ */
+async function nonStreamingFallbackWithSwipe(context, args) {
+    const {
+        profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        debugLabel, includeChatHistory, includeIdentityContext, streamType,
+    } = args;
+
+    const text = await requestCompletion({
+        profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        debugLabel, includeChatHistory, includeIdentityContext,
+    });
+
+    if (streamType === 'swipe' && text && Array.isArray(context?.chat) && context.chat.length > 0) {
+        const messageIndex = context.chat.length - 1;
+        try {
+            const { appendSwipeToMessage } = await import('./swipeHelpers.js');
+            await appendSwipeToMessage(context, messageIndex, text, {
+                source: 'manual',
+                model: 'GuidedGenerations',
+            });
+            debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback appended swipe ${messageIndex}.${(context.chat[messageIndex]?.swipes?.length ?? 1) - 1} ${debugLabel ? `(${debugLabel})` : ''}`);
+        } catch (error) {
+            debugWarn(`[${extensionName}] requestStreamingCompletion: non-streaming fallback failed to append swipe ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+        }
+    }
+
+    return text;
+}
+
+/**
  * Streaming variant of requestCompletion.
  *
  * Sends the request via ConnectionManagerRequestService.sendRequest with
@@ -1059,13 +1096,14 @@ export async function requestStreamingCompletion({
     // Internal Helper Preset (non-streaming variant): the user explicitly
     // opted out of streaming for this tool. Route through the silent
     // requestCompletion path instead of StreamingProcessor. The preset
-    // payload is identical — only the transport differs.
+    // payload is identical — only the transport differs. When the caller
+    // asked for a swipe, we still need to append the result as a new swipe
+    // (StreamingProcessor would have done that itself in the streaming path).
     if (presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE) {
         debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming Helper Preset, delegating to requestCompletion ${debugLabel ? `(${debugLabel})` : ''}`);
-        return requestCompletion({
+        return nonStreamingFallbackWithSwipe(context, {
             profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel: debugLabel ? `${debugLabel} (non-stream)` : 'non-stream',
-            includeChatHistory, includeIdentityContext,
+            debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1074,9 +1112,9 @@ export async function requestStreamingCompletion({
     const connectionManagerService = context?.ConnectionManagerRequestService;
     if (!StreamingProcessor || typeof setStreamingProcessor !== 'function' || !connectionManagerService?.sendRequest) {
         debugLog(`[${extensionName}] requestStreamingCompletion: StreamingProcessor API unavailable, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
-        return requestCompletion({
+        return nonStreamingFallbackWithSwipe(context, {
             profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext,
+            debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1089,9 +1127,9 @@ export async function requestStreamingCompletion({
     }
     if (!profile?.id) {
         debugLog(`[${extensionName}] requestStreamingCompletion: no saved profile selected, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
-        return requestCompletion({
+        return nonStreamingFallbackWithSwipe(context, {
             profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext,
+            debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1102,9 +1140,9 @@ export async function requestStreamingCompletion({
 
     if (mode !== 'chat') {
         debugLog(`[${extensionName}] requestStreamingCompletion: text completion not supported for streaming, falling back ${debugLabel ? `(${debugLabel})` : ''}`);
-        return requestCompletion({
+        return nonStreamingFallbackWithSwipe(context, {
             profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext,
+            debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
