@@ -5,7 +5,7 @@
 
 // External dependencies (SillyTavern)
 import { getContext, extension_settings, renderExtensionTemplateAsync, getExtensionManifest } from '../../../../../extensions.js';
-import { chat, eventSource, event_types, saveChatConditional, addOneMessage, deactivateSendButtons, activateSendButtons, setExternalAbortController, setSendButtonState } from '../../../../../../script.js';
+import { chat, eventSource, event_types, saveChatConditional, addOneMessage, deactivateSendButtons, activateSendButtons, setExternalAbortController, setSendButtonState, saveReply } from '../../../../../../script.js';
 
 // Core extension constants and functions (defined locally to avoid circular dependency)
 const extensionName = "GuidedGenerations-Extension";
@@ -190,6 +190,7 @@ export {
     activateSendButtons,
     setExternalAbortController,
     setSendButtonState,
+    saveReply,
     renderExtensionTemplateAsync,
     getExtensionManifest,
     

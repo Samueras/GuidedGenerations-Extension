@@ -12,6 +12,7 @@ import {
     setExternalAbortController,
     setSendButtonState,
     getOpenAIPromptManagerHelpers,
+    saveReply,
 } from '../persistentGuides/guideExports.js';
 
 const TEXT_API_IDS = new Set([
@@ -188,8 +189,20 @@ function resolveCompletionMode(profile, apiType, apiId) {
 }
 
 function extractCompletionText(result) {
-    if (typeof result === 'string') return result;
-    if (!result || typeof result !== 'object') return '';
+    return extractCompletionResult(result).content;
+}
+
+/**
+ * Same as extractCompletionText, but also extracts reasoning when present.
+ * Connection Manager's `extractData:true` returns `{content, reasoning}`;
+ * raw backend responses may carry reasoning in `choices[0].message.reasoning_content`.
+ * Falls back to '' for both fields when nothing is found.
+ * @returns {{content: string, reasoning: string}}
+ */
+function extractCompletionResult(result) {
+    const empty = { content: '', reasoning: '' };
+    if (typeof result === 'string') return { content: result, reasoning: '' };
+    if (!result || typeof result !== 'object') return empty;
 
     const candidates = [
         result.pipe,
@@ -201,12 +214,29 @@ function extractCompletionText(result) {
         result?.data?.choices?.[0]?.text,
     ];
 
+    let content = '';
     for (const value of candidates) {
         if (typeof value === 'string' && value.trim() !== '') {
-            return value;
+            content = value;
+            break;
         }
     }
-    return '';
+
+    const reasoningCandidates = [
+        result.reasoning,
+        result?.choices?.[0]?.message?.reasoning_content,
+        result?.choices?.[0]?.message?.reasoning,
+        result?.data?.choices?.[0]?.message?.reasoning_content,
+    ];
+    let reasoning = '';
+    for (const value of reasoningCandidates) {
+        if (typeof value === 'string' && value.trim() !== '') {
+            reasoning = value;
+            break;
+        }
+    }
+
+    return { content, reasoning };
 }
 
 function isRawChatMessage(message) {
@@ -616,6 +646,19 @@ async function mergeReasoningFlags(payload, model = null, options = {}) {
     return payload;
 }
 
+/**
+ * When enableReasoning is true, returns an overrides object suitable for
+ * spreading into requestOverrides that carries the reasoning flags the model
+ * needs to actually emit thinking. Used by the non-streaming fallback paths
+ * in requestStreamingCompletion so they still request reasoning from the model.
+ */
+async function buildReasoningFlagOverrides(enableReasoning) {
+    if (!enableReasoning) return {};
+    const overrides = {};
+    await mergeReasoningFlags(overrides, null, { forceShowThoughts: true });
+    return overrides;
+}
+
 function emitGenerationEvent(context, eventType, payload = {}) {
     if (!context?.eventSource || !context?.eventTypes?.[eventType]) return;
     try {
@@ -820,7 +863,7 @@ export async function shouldUseDirectCall(profileName = '', presetName = '') {
     return true;
 }
 
-export async function requestCompletion({
+export async function requestCompletionWithReasoning({
     profileName = '',
     presetName = '',
     prompt = '',
@@ -831,10 +874,11 @@ export async function requestCompletion({
     includeChatHistory = true,
     includeIdentityContext = true,
 } = {}) {
+    const empty = { content: '', reasoning: '' };
     const context = getContext();
     if (!context) {
         debugWarn(`[${extensionName}] requestCompletion: Context unavailable ${debugLabel ? `(${debugLabel})` : ''}`);
-        return '';
+        return { ...empty };
     }
 
     const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
@@ -856,7 +900,7 @@ export async function requestCompletion({
     const service = mode === 'text' ? context?.TextCompletionService : context?.ChatCompletionService;
     if (!service || typeof service.processRequest !== 'function') {
         debugWarn(`[${extensionName}] requestCompletion: ${mode} completion service unavailable ${debugLabel ? `(${debugLabel})` : ''}`);
-        return '';
+        return { ...empty };
     }
 
     const requestData = { ...requestOverrides };
@@ -993,17 +1037,17 @@ export async function requestCompletion({
                 overridePayload
             );
             emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
-            return extractCompletionText(result);
+            return extractCompletionResult(result);
         }
 
         emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
         const result = await service.processRequest(requestData, options, true, abortController.signal);
         emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
-        return extractCompletionText(result);
+        return extractCompletionResult(result);
     } catch (error) {
         emitGenerationEvent(context, 'GENERATION_STOPPED', { source: extensionName });
         debugWarn(`[${extensionName}] requestCompletion failed ${debugLabel ? `(${debugLabel})` : ''}:`, error);
-        return '';
+        return { ...empty };
     } finally {
         activateSendButtons?.();
         setSendButtonState?.(false);
@@ -1015,13 +1059,24 @@ export async function requestCompletion({
 }
 
 /**
- * Run a non-streaming requestCompletion on behalf of requestStreamingCompletion
- * and (when the caller asked for a new swipe) append the result as a swipe to
- * the last chat message. StreamingProcessor would have created the swipe itself
- * in the streaming path — this helper mirrors that for the non-streaming
- * fallback so the caller-visible behavior is identical.
+ * Thin wrapper around requestCompletionWithReasoning that returns only the
+ * content string. Preserves the historical contract of requestCompletion
+ * (string in, string out) so existing callers don't need to change.
+ */
+export async function requestCompletion(args) {
+    const result = await requestCompletionWithReasoning(args);
+    return result.content;
+}
+
+/**
+ * Run a non-streaming requestCompletion on behalf of requestStreamingCompletion.
+ * When the caller asked for a new swipe, the result is written via ST's native
+ * saveReply({type:'swipe', reasoning}) — the same path Generate('swipe') uses
+ * when streaming is disabled. This preserves reasoning (extra.reasoning +
+ * swipe_info[i].extra.reasoning) and produces a proper swipe exactly like a
+ * normal ST generation would.
  *
- * Returns the final text (same contract as requestStreamingCompletion).
+ * Returns the final content text (same contract as requestStreamingCompletion).
  */
 async function nonStreamingFallbackWithSwipe(context, args) {
     const {
@@ -1029,26 +1084,39 @@ async function nonStreamingFallbackWithSwipe(context, args) {
         debugLabel, includeChatHistory, includeIdentityContext, streamType,
     } = args;
 
-    const text = await requestCompletion({
+    const { content, reasoning } = await requestCompletionWithReasoning({
         profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
         debugLabel, includeChatHistory, includeIdentityContext,
     });
 
-    if (streamType === 'swipe' && text && Array.isArray(context?.chat) && context.chat.length > 0) {
-        const messageIndex = context.chat.length - 1;
+    if (streamType === 'swipe' && content && Array.isArray(context?.chat) && context.chat.length > 0) {
         try {
-            const { appendSwipeToMessage } = await import('./swipeHelpers.js');
-            await appendSwipeToMessage(context, messageIndex, text, {
-                source: 'manual',
-                model: 'GuidedGenerations',
+            // Delegate to ST's native swipe-write path. saveReply({type:'swipe'})
+            // increments swipes.length, writes the new slot, sets swipe_id, fills
+            // extra.reasoning, refreshes the DOM, fires MESSAGE_SWIPED, and saves.
+            const { type, getMessage } = await saveReply({
+                type: 'swipe',
+                getMessage: content,
+                reasoning,
             });
-            debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback appended swipe ${messageIndex}.${(context.chat[messageIndex]?.swipes?.length ?? 1) - 1} ${debugLabel ? `(${debugLabel})` : ''}`);
+            debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback wrote swipe via saveReply (type=${type}) ${debugLabel ? `(${debugLabel})` : ''}`);
+            return typeof getMessage === 'string' ? getMessage : content;
         } catch (error) {
-            debugWarn(`[${extensionName}] requestStreamingCompletion: non-streaming fallback failed to append swipe ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+            debugWarn(`[${extensionName}] requestStreamingCompletion: saveReply failed, falling back to manual swipe append ${debugLabel ? `(${debugLabel})` : ''}:`, error);
+            try {
+                const messageIndex = context.chat.length - 1;
+                const { appendSwipeToMessage } = await import('./swipeHelpers.js');
+                await appendSwipeToMessage(context, messageIndex, content, {
+                    source: 'manual',
+                    model: 'GuidedGenerations',
+                });
+            } catch (fallbackError) {
+                debugWarn(`[${extensionName}] requestStreamingCompletion: manual swipe append also failed ${debugLabel ? `(${debugLabel})` : ''}:`, fallbackError);
+            }
         }
     }
 
-    return text;
+    return content;
 }
 
 /**
@@ -1101,9 +1169,11 @@ export async function requestStreamingCompletion({
     // (StreamingProcessor would have done that itself in the streaming path).
     if (presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE) {
         debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming Helper Preset, delegating to requestCompletion ${debugLabel ? `(${debugLabel})` : ''}`);
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
         return nonStreamingFallbackWithSwipe(context, {
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext, streamType,
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides, debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1112,9 +1182,11 @@ export async function requestStreamingCompletion({
     const connectionManagerService = context?.ConnectionManagerRequestService;
     if (!StreamingProcessor || typeof setStreamingProcessor !== 'function' || !connectionManagerService?.sendRequest) {
         debugLog(`[${extensionName}] requestStreamingCompletion: StreamingProcessor API unavailable, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
         return nonStreamingFallbackWithSwipe(context, {
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext, streamType,
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides, debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1127,9 +1199,11 @@ export async function requestStreamingCompletion({
     }
     if (!profile?.id) {
         debugLog(`[${extensionName}] requestStreamingCompletion: no saved profile selected, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
         return nonStreamingFallbackWithSwipe(context, {
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext, streamType,
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides, debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1140,9 +1214,11 @@ export async function requestStreamingCompletion({
 
     if (mode !== 'chat') {
         debugLog(`[${extensionName}] requestStreamingCompletion: text completion not supported for streaming, falling back ${debugLabel ? `(${debugLabel})` : ''}`);
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
         return nonStreamingFallbackWithSwipe(context, {
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
-            debugLabel, includeChatHistory, includeIdentityContext, streamType,
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides, debugLabel, includeChatHistory, includeIdentityContext, streamType,
         });
     }
 
@@ -1359,12 +1435,15 @@ export async function requestStreamingDisplay({
     // identical — only the transport differs.
     if (presetName === INTERNAL_HELPER_PRESET_NONSTREAM_VALUE) {
         debugLog(`[${extensionName}] requestStreamingDisplay: non-streaming Helper Preset, delegating to requestCompletion ${debugLabel ? `(${debugLabel})` : ''}`);
-        const text = await requestCompletion({
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
+        const result = await requestCompletionWithReasoning({
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides,
             debugLabel: debugLabel ? `${debugLabel} (non-stream)` : 'non-stream',
             includeChatHistory, includeIdentityContext,
         });
-        return { content: text, reasoning: '' };
+        return { content: result.content, reasoning: result.reasoning };
     }
 
     const connectionManagerService = context?.ConnectionManagerRequestService;
@@ -1372,11 +1451,14 @@ export async function requestStreamingDisplay({
     const StreamingDisplay = context?.StreamingDisplay;
     if (typeof sendStreamedRequest !== 'function' || !StreamingDisplay) {
         debugLog(`[${extensionName}] requestStreamingDisplay: sendStreamedRequest/StreamingDisplay unavailable, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
-        const text = await requestCompletion({
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
+        const result = await requestCompletionWithReasoning({
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides,
             debugLabel, includeChatHistory, includeIdentityContext,
         });
-        return { content: text, reasoning: '' };
+        return { content: result.content, reasoning: result.reasoning };
     }
 
     const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
@@ -1388,11 +1470,14 @@ export async function requestStreamingDisplay({
     }
     if (!profile?.id) {
         debugLog(`[${extensionName}] requestStreamingDisplay: no saved profile selected, falling back to non-streaming ${debugLabel ? `(${debugLabel})` : ''}`);
-        const text = await requestCompletion({
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
+        const result = await requestCompletionWithReasoning({
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides,
             debugLabel, includeChatHistory, includeIdentityContext,
         });
-        return { content: text, reasoning: '' };
+        return { content: result.content, reasoning: result.reasoning };
     }
 
     const resolvedProfileName = profile?.name || profileName || selectedProfileId || 'unknown';
@@ -1402,11 +1487,14 @@ export async function requestStreamingDisplay({
 
     if (mode !== 'chat') {
         debugLog(`[${extensionName}] requestStreamingDisplay: text completion not supported for streaming display, falling back ${debugLabel ? `(${debugLabel})` : ''}`);
-        const text = await requestCompletion({
-            profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
+        const reasoningOverrides = await buildReasoningFlagOverrides(enableReasoning);
+        const result = await requestCompletionWithReasoning({
+            profileName, presetName, prompt, messages,
+            requestOverrides: { ...requestOverrides, ...reasoningOverrides },
+            optionsOverrides,
             debugLabel, includeChatHistory, includeIdentityContext,
         });
-        return { content: text, reasoning: '' };
+        return { content: result.content, reasoning: result.reasoning };
     }
 
     const presetManager = context?.getPresetManager?.(apiId);
