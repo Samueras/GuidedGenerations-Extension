@@ -13,6 +13,8 @@ import {
     setSendButtonState,
     getOpenAIPromptManagerHelpers,
     saveReply,
+    extractMessageFromData,
+    extractReasoningFromData,
 } from '../persistentGuides/guideExports.js';
 
 const TEXT_API_IDS = new Set([
@@ -236,6 +238,73 @@ function extractCompletionResult(result) {
         }
     }
 
+    return { content, reasoning };
+}
+
+/**
+ * Extract `{content, reasoning}` from a raw backend response using ST's native
+ * extractors with the PROFILE's actual chat completion source (resolved via
+ * CONNECT_API_MAP). This works around ST core's bug where its built-in
+ * extraction passes the source via the wrong param name and falls back to the
+ * user's globally active source — wrong whenever GG uses a different profile.
+ *
+ * @param {any} raw - The raw JSON response from the backend (when called with
+ *   extractData:false) OR a pre-extracted {content, reasoning} object (if the
+ *   caller couldn't opt out of extraction). Both shapes are handled.
+ * @param {object} profile - The Connection Manager profile actually used.
+ * @param {'chat'|'text'} mode - Completion mode.
+ * @param {string} apiId - Resolved API id (e.g. 'openai', 'textgenerationwebui').
+ * @returns {{content: string, reasoning: string}}
+ */
+function extractResultForProfile(raw, profile, mode, apiId) {
+    const empty = { content: '', reasoning: '' };
+    if (!raw) return { ...empty };
+
+    // Heuristic: backend raw JSON responses always carry `choices`, `content`
+    // (as an array, e.g. Claude), `responseContent` (Gemini), or `data`. If
+    // none of those are present but `content`+`reasoning` are, the caller
+    // handed us a pre-extracted {content, reasoning} object (e.g. from a path
+    // we couldn't opt out of). Both shapes are handled.
+    const looksLikeRawBackend =
+        (raw && typeof raw === 'object')
+        && ('choices' in raw || 'responseContent' in raw || 'data' in raw
+            || (Array.isArray(raw.content)));
+
+    if (!looksLikeRawBackend) {
+        return extractCompletionResult(raw);
+    }
+
+    // Raw backend JSON — extract ourselves with the profile's actual source.
+    const context = getContext();
+    const apiMap = profile?.api ? context?.CONNECT_API_MAP?.[profile.api] : null;
+    const profileSource = apiMap?.source;  // e.g. 'custom', 'deepseek', 'openrouter'
+    const profileTextGenType = apiMap?.type;  // e.g. textgen_types.OPENROUTER
+    const mainApi = mode === 'text' ? 'textgenerationwebui' : 'openai';
+
+    let content = '';
+    let reasoning = '';
+    try {
+        content = typeof extractMessageFromData === 'function'
+            ? (extractMessageFromData(raw, mainApi) || '')
+            : extractCompletionResult(raw).content;
+    } catch (error) {
+        debugWarn(`[${extensionName}] extractResultForProfile: extractMessageFromData failed:`, error);
+        content = extractCompletionResult(raw).content;
+    }
+    try {
+        if (typeof extractReasoningFromData === 'function') {
+            reasoning = extractReasoningFromData(raw, {
+                mainApi,
+                chatCompletionSource: profileSource,
+                textGenType: profileTextGenType,
+                ignoreShowThoughts: true,
+            }) || '';
+        }
+    } catch (error) {
+        debugWarn(`[${extensionName}] extractResultForProfile: extractReasoningFromData failed:`, error);
+    }
+
+    debugLog(`[${extensionName}] extractResultForProfile: profile.api="${profile?.api}" source="${profileSource ?? 'unset'}" → content(${content.length} chars) reasoning(${reasoning.length} chars)`);
     return { content, reasoning };
 }
 
@@ -977,8 +1046,18 @@ export async function requestCompletionWithReasoning({
 
         if (canUseConnectionManager) {
             const maxTokens = requestOverrides?.max_tokens ?? requestOverrides?.maxTokens;
+            // Pass extractData:false so we get the RAW backend response and can
+            // run extractMessageFromData / extractReasoningFromData ourselves.
+            // Why: ST core's Connection Manager has a bug where it passes the
+            // profile's chat_completion_source as `textGenType` instead of
+            // `chatCompletionSource` (custom-request.js:485), so its built-in
+            // reasoning extraction falls back to oai_settings.chat_completion_source
+            // — the user's GLOBAL source, not the profile's. When GG uses a
+            // different profile (e.g. GLM) while the user's active API is
+            // something else (e.g. Gemini), CM's extraction silently returns
+            // empty reasoning even though the model produced thinking.
             const custom = {
-                extractData: true,
+                extractData: false,
                 signal: abortController.signal,
             };
 
@@ -1029,7 +1108,7 @@ export async function requestCompletionWithReasoning({
             overridePayload.stream = false;
             emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
             const promptPayload = mode === 'chat' ? requestData.messages : typeof prompt === 'string' ? prompt : '';
-            const result = await connectionManagerService.sendRequest(
+            const rawResult = await connectionManagerService.sendRequest(
                 profile.id,
                 promptPayload,
                 maxTokens,
@@ -1037,13 +1116,20 @@ export async function requestCompletionWithReasoning({
                 overridePayload
             );
             emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
-            return extractCompletionResult(result);
+            // Extract content + reasoning ourselves using the profile's actual
+            // chat_completion_source (resolved via CONNECT_API_MAP). This works
+            // around the ST core bug described above.
+            const result = extractResultForProfile(rawResult, profile, mode, apiId);
+            return result;
         }
 
         emitGenerationEvent(context, 'GENERATION_STARTED', { source: extensionName });
-        const result = await service.processRequest(requestData, options, true, abortController.signal);
+        // Same extractData:false fix as the CM path above — ST core's
+        // service.sendRequest has the same reasoning-extraction bug.
+        const rawResult = await service.processRequest(requestData, options, false, abortController.signal);
         emitGenerationEvent(context, 'GENERATION_ENDED', { source: extensionName });
-        return extractCompletionResult(result);
+        const result = extractResultForProfile(rawResult, profile, mode, apiId);
+        return result;
     } catch (error) {
         emitGenerationEvent(context, 'GENERATION_STOPPED', { source: extensionName });
         debugWarn(`[${extensionName}] requestCompletion failed ${debugLabel ? `(${debugLabel})` : ''}:`, error);
@@ -1076,6 +1162,13 @@ export async function requestCompletion(args) {
  * swipe_info[i].extra.reasoning) and produces a proper swipe exactly like a
  * normal ST generation would.
  *
+ * After saveReply, we override lastMessage.extra.api / .model with the
+ * actually-used profile's values: saveReply populates them from ST's globally
+ * active main_api / chat_completion_source via getGeneratingApi()/getGeneratingModel(),
+ * which is wrong when the caller used a different Connection Manager profile
+ * (the icon and "model - api" tooltip would otherwise reflect the user's
+ * active ST API instead of the one GG used for this tool).
+ *
  * Returns the final content text (same contract as requestStreamingCompletion).
  */
 async function nonStreamingFallbackWithSwipe(context, args) {
@@ -1088,6 +1181,7 @@ async function nonStreamingFallbackWithSwipe(context, args) {
         profileName, presetName, prompt, messages, requestOverrides, optionsOverrides,
         debugLabel, includeChatHistory, includeIdentityContext,
     });
+    debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback got content(${content.length} chars) reasoning(${reasoning.length} chars) ${debugLabel ? `(${debugLabel})` : ''}`);
 
     if (streamType === 'swipe' && content && Array.isArray(context?.chat) && context.chat.length > 0) {
         const lastMessage = context.chat[context.chat.length - 1];
@@ -1114,6 +1208,41 @@ async function nonStreamingFallbackWithSwipe(context, args) {
                 getMessage: content,
                 reasoning,
             });
+
+            // saveReply wrote extra.api/extra.model from ST's GLOBAL state
+            // (getGeneratingApi/getGeneratingModel). If we used a Connection
+            // Manager profile that differs from the user's active ST API,
+            // those fields are wrong — wrong icon, wrong tooltip. Re-resolve
+            // the profile and overwrite both extra and swipe_info[new].extra
+            // so the icon/tooltip reflects the profile GG actually used.
+            try {
+                const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+                const profile = resolveProfileByNameOrId(profileName, profiles);
+                if (profile?.api && profile?.model) {
+                    const apiMap = context?.CONNECT_API_MAP?.[profile.api];
+                    // For chat-completion backends, the icon-keyed value is the
+                    // chat completion source (e.g. 'deepseek', 'openrouter').
+                    // For text-completion backends, it's the textgen type.
+                    const apiLabel = apiMap?.source || apiMap?.type || profile.api;
+                    if (apiLabel) lastMessage.extra.api = apiLabel;
+                    lastMessage.extra.model = profile.model;
+
+                    const newSwipeId = lastMessage.swipe_id;
+                    if (Array.isArray(lastMessage.swipe_info) && lastMessage.swipe_info[newSwipeId]) {
+                        lastMessage.swipe_info[newSwipeId].extra = structuredClone(lastMessage.extra);
+                    }
+
+                    // Re-render so the icon updates immediately.
+                    const mesDom = document.querySelector(`#chat .mes[mesid="${context.chat.length - 1}"]`);
+                    if (mesDom && typeof context.updateMessageContent === 'function') {
+                        context.updateMessageContent(context.chat.length - 1);
+                    }
+                    debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback overrode extra.api="${apiLabel}" extra.model="${profile.model}" ${debugLabel ? `(${debugLabel})` : ''}`);
+                }
+            } catch (overrideError) {
+                debugWarn(`[${extensionName}] requestStreamingCompletion: failed to override api/model on swipe ${debugLabel ? `(${debugLabel})` : ''}:`, overrideError);
+            }
+
             debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback wrote swipe via saveReply (type=${type}) ${debugLabel ? `(${debugLabel})` : ''}`);
             return typeof getMessage === 'string' ? getMessage : content;
         } catch (error) {
