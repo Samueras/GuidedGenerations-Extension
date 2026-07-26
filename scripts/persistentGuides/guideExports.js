@@ -5,7 +5,7 @@
 
 // External dependencies (SillyTavern)
 import { getContext, extension_settings, renderExtensionTemplateAsync, getExtensionManifest } from '../../../../../extensions.js';
-import { chat, eventSource, event_types, saveChatConditional, addOneMessage, deactivateSendButtons, activateSendButtons, setExternalAbortController, setSendButtonState, saveReply, extractMessageFromData } from '../../../../../../script.js';
+import { chat, eventSource, event_types, saveChatConditional, addOneMessage, deactivateSendButtons, activateSendButtons, setExternalAbortController, setSendButtonState, saveReply, extractMessageFromData, createModelIcon } from '../../../../../../script.js';
 import { extractReasoningFromData } from '../../../../../reasoning.js';
 
 // Core extension constants and functions (defined locally to avoid circular dependency)
@@ -193,6 +193,7 @@ export {
     setSendButtonState,
     saveReply,
     extractMessageFromData,
+    createModelIcon,
     renderExtensionTemplateAsync,
     getExtensionManifest,
     

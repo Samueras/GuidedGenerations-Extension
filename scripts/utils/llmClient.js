@@ -15,6 +15,7 @@ import {
     saveReply,
     extractMessageFromData,
     extractReasoningFromData,
+    createModelIcon,
 } from '../persistentGuides/guideExports.js';
 
 const TEXT_API_IDS = new Set([
@@ -1155,6 +1156,61 @@ export async function requestCompletion(args) {
 }
 
 /**
+ * Replace the SVG API icons already painted into a message DOM element.
+ * ST's insertSVGIcon (called from addOneMessage during saveReply) paints
+ * `.timestamp-icon` and `.thinking-icon` from whatever was in extra.api at
+ * that moment. When we later override extra.api to the Connection Manager
+ * profile's source, those painted SVGs stay wrong unless we replace them.
+ *
+ * Mirrors the structure of insertSVGIcon in script.js without calling the
+ * non-exported helper.
+ */
+function replaceMessageApiIcons(messageIndex, apiLabel, modelLabel) {
+    if (!apiLabel || typeof createModelIcon !== 'function') return;
+    const mesDom = document.querySelector(`#chat .mes[mesid="${messageIndex}"]`);
+    if (!mesDom) return;
+
+    const tooltip = modelLabel ? `${apiLabel} - ${modelLabel}` : apiLabel;
+
+    const replaceOne = (existingSelector, className, targetSelector, insertBefore) => {
+        const existing = mesDom.querySelector(existingSelector);
+        const target = mesDom.querySelector(targetSelector);
+        if (!target && !existing) return;
+
+        const image = createModelIcon(apiLabel, modelLabel);
+        image.classList.add(className);
+        image.title = tooltip;
+
+        // ST's insertSVGIcon awaits SVGInject to inline the SVG for theming.
+        // Mirror that when the global is available; otherwise leave the <img>.
+        image.onload = async () => {
+            try {
+                if (typeof window.SVGInject === 'function') {
+                    await window.SVGInject(image);
+                }
+            } catch {
+                // Non-fatal: icon still renders as <img>.
+            }
+        };
+
+        if (existing) {
+            existing.replaceWith(image);
+        } else if (target) {
+            if (insertBefore) target.before(image);
+            else target.after(image);
+        }
+    };
+
+    replaceOne('.timestamp-icon', 'timestamp-icon', '.timestamp', false);
+    replaceOne('.thinking-icon', 'thinking-icon', '.mes_reasoning_header_title', true);
+
+    const timestamp = mesDom.querySelector('.timestamp');
+    if (timestamp) {
+        timestamp.setAttribute('title', tooltip);
+    }
+}
+
+/**
  * Run a non-streaming requestCompletion on behalf of requestStreamingCompletion.
  * When the caller asked for a new swipe, the result is written via ST's native
  * saveReply({type:'swipe', reasoning}) — the same path Generate('swipe') uses
@@ -1210,34 +1266,49 @@ async function nonStreamingFallbackWithSwipe(context, args) {
             });
 
             // saveReply wrote extra.api/extra.model from ST's GLOBAL state
-            // (getGeneratingApi/getGeneratingModel). If we used a Connection
-            // Manager profile that differs from the user's active ST API,
-            // those fields are wrong — wrong icon, wrong tooltip. Re-resolve
-            // the profile and overwrite both extra and swipe_info[new].extra
-            // so the icon/tooltip reflects the profile GG actually used.
+            // (getGeneratingApi/getGeneratingModel) AND already painted the
+            // SVG icon into the DOM via addOneMessage → insertSVGIcon. If we
+            // used a Connection Manager profile that differs from the user's
+            // active ST API, both the data AND the painted icon are wrong.
+            // Re-resolve the profile (with the same selectedProfile fallback
+            // requestCompletion uses), overwrite extra, and replace the
+            // painted SVG icons so the UI matches the profile GG actually used.
             try {
                 const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
-                const profile = resolveProfileByNameOrId(profileName, profiles);
-                if (profile?.api && profile?.model) {
+                const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
+                let profile = resolveProfileByNameOrId(profileName, profiles);
+                if (!profile && selectedProfileId) {
+                    profile = profiles.find((entry) => entry?.id === selectedProfileId) || null;
+                }
+                if (profile?.api) {
                     const apiMap = context?.CONNECT_API_MAP?.[profile.api];
-                    // For chat-completion backends, the icon-keyed value is the
-                    // chat completion source (e.g. 'deepseek', 'openrouter').
-                    // For text-completion backends, it's the textgen type.
+                    // Icon src is `/img/${apiName}.svg`. For chat-completion
+                    // backends the key is the chat completion source
+                    // (e.g. 'custom', 'deepseek', 'makersuite'); for text
+                    // backends it's the textgen type. Fall back to profile.api
+                    // itself (which is often already the source key).
                     const apiLabel = apiMap?.source || apiMap?.type || profile.api;
+                    const modelLabel = profile.model || '';
                     if (apiLabel) lastMessage.extra.api = apiLabel;
-                    lastMessage.extra.model = profile.model;
+                    if (modelLabel) lastMessage.extra.model = modelLabel;
 
                     const newSwipeId = lastMessage.swipe_id;
                     if (Array.isArray(lastMessage.swipe_info) && lastMessage.swipe_info[newSwipeId]) {
                         lastMessage.swipe_info[newSwipeId].extra = structuredClone(lastMessage.extra);
                     }
 
-                    // Re-render so the icon updates immediately.
-                    const mesDom = document.querySelector(`#chat .mes[mesid="${context.chat.length - 1}"]`);
-                    if (mesDom && typeof context.updateMessageContent === 'function') {
-                        context.updateMessageContent(context.chat.length - 1);
-                    }
-                    debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback overrode extra.api="${apiLabel}" extra.model="${profile.model}" ${debugLabel ? `(${debugLabel})` : ''}`);
+                    // Replace the already-painted icons. saveReply already ran
+                    // insertSVGIcon with the WRONG api, so updating extra alone
+                    // does nothing — the SVG is already in the DOM.
+                    replaceMessageApiIcons(
+                        context.chat.length - 1,
+                        apiLabel,
+                        modelLabel,
+                    );
+
+                    debugLog(`[${extensionName}] requestStreamingCompletion: non-streaming fallback overrode extra.api="${apiLabel}" extra.model="${modelLabel}" ${debugLabel ? `(${debugLabel})` : ''}`);
+                } else {
+                    debugWarn(`[${extensionName}] requestStreamingCompletion: could not resolve profile for api/model override (profileName="${profileName}") ${debugLabel ? `(${debugLabel})` : ''}`);
                 }
             } catch (overrideError) {
                 debugWarn(`[${extensionName}] requestStreamingCompletion: failed to override api/model on swipe ${debugLabel ? `(${debugLabel})` : ''}:`, overrideError);
