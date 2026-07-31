@@ -895,6 +895,22 @@ function updateExtensionButtons() {
 
     // --- Get or Create the Action Button Container --- 
     let buttonContainer = document.getElementById('gg-action-button-container');
+    // Before clearing, detach the QR bar (if it's currently parented inside
+    // our container) so the rebuild below doesn't destroy its DOM. Clearing
+    // via innerHTML='' would otherwise nuke #qr--bar, and ST's Quick Reply
+    // ButtonUi would keep a dangling reference - making all QR buttons vanish
+    // until the user manually changes something in QR settings.
+    // `detachedQrBar` is non-null only when we actually removed it from our
+    // container; that's the signal used below to re-attach it. If the QR bar
+    // lives elsewhere (or doesn't exist yet), integrateQRBar() handles it.
+    let detachedQrBar = null;
+    if (buttonContainer) {
+        const existingQrBar = document.getElementById('qr--bar');
+        if (existingQrBar && buttonContainer.contains(existingQrBar)) {
+            existingQrBar.remove();
+            detachedQrBar = existingQrBar;
+        }
+    }
     if (!buttonContainer) {
         buttonContainer = document.createElement('div');
         buttonContainer.id = 'gg-action-button-container';
@@ -904,7 +920,8 @@ function updateExtensionButtons() {
         console.log(`${extensionName}: Created action button container below input area. - TESTING CHANGES TRANSFER`);
     }
 
-    // Clear the container before adding/arranging buttons
+    // Clear the container before adding/arranging buttons. Safe now: the QR
+    // bar (if any) has been detached above and is preserved in `detachedQrBar`.
     buttonContainer.innerHTML = '';
 
     // Create a separate container for menu buttons (left side)
@@ -926,6 +943,26 @@ function updateExtensionButtons() {
     buttonContainer.appendChild(menuButtonsContainer);
     buttonContainer.appendChild(qrContainer);
     buttonContainer.appendChild(actionButtonsContainer);
+
+    // If we detached the QR bar above, place it back. If integrateQrBar is
+    // on, it belongs inside #gg-qr-container; otherwise put it back on
+    // #send_form so it stays visible. This happens before integrateQRBar() so
+    // the bar is in the DOM when that function runs.
+    if (detachedQrBar) {
+        try {
+            const currentSettings = extension_settings[extensionName];
+            if (currentSettings?.integrateQrBar) {
+                qrContainer.appendChild(detachedQrBar);
+            } else if (sendForm) {
+                sendForm.appendChild(detachedQrBar);
+            } else {
+                // Fallback: keep it inside our container to avoid orphaning.
+                qrContainer.appendChild(detachedQrBar);
+            }
+        } catch (error) {
+            console.error(`${extensionName}: Error re-attaching QR bar after rebuild:`, error);
+        }
+    }
     
     // --- Create GG Tools Menu Button (Wand) --- 
     let ggMenuButton = document.getElementById('gg_menu_button');
