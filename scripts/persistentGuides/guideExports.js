@@ -103,7 +103,7 @@ async function getOpenAIPromptManagerHelpers() {
 }
 
 // Settings management functions - imported from index.js
-import { loadSettings, updateSettingsUI, addSettingsEventListeners, debugProfileSystem, getDebugMessages, clearDebugMessages, getDebugMessagesAsText, debugError } from '../../index.js';
+import { loadSettings, updateSettingsUI, addSettingsEventListeners, debugProfileSystem, getDebugMessages, clearDebugMessages, getDebugMessagesAsText, debugError, waitPendingAutoTriggers } from '../../index.js';
 
 // Default settings object
 const defaultSettings = {
@@ -270,6 +270,7 @@ export {
     getNextRecoverableInput,
     setLastImpersonateResult,
     getLastImpersonateResult,
+    waitPendingAutoTriggers,
     
     // Debug logging functions
     getDebugMessages,

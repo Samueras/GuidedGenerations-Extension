@@ -1,6 +1,6 @@
 // scripts/guidedSwipe.js
 
-import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, expandStMacros } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, expandStMacros, waitPendingAutoTriggers } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Helper function for delays
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -261,6 +261,16 @@ const guidedSwipe = async () => {
             alert(`Guided Swipe Error: ${error.message}`);
         }
     } finally {
+        // Clean up the guided-action injection BEFORE waiting on the auto-trigger
+        // gate, otherwise Separated Thinking (which uses ST's standard chat
+        // builder and would see script_injects) would pick up this leftover
+        // instruction as additional guidance.
+        debugLog('[Swipe] Cleaning up injection (finally block)');
+        await executeSTScriptCommand('/flushinject instruct');
+        // Wait for any pending Separated Thinking auto-trigger to finish before
+        // restoring the textarea, so ST's prompt manager doesn't pick up the
+        // restored text as {{input}} for Separated Thinking.
+        await waitPendingAutoTriggers();
         // Always attempt to restore the input field from the shared state (imported)
         if (textarea) { // Check if textarea was found initially
             const restoredInput = getPreviousImpersonateInput();
@@ -271,9 +281,6 @@ const guidedSwipe = async () => {
             // This case should ideally not happen if the initial check passed
             debugLog("[Swipe] Textarea was not available for restoration in finally block.");
         }
-        // Clean up injection using the correct key
-        debugLog('[Swipe] Cleaning up injection (finally block)');
-        await executeSTScriptCommand('/flushinject instruct'); // Already using 'instruct' ID here, which seems correct
     }
 };
 

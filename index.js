@@ -1617,6 +1617,49 @@ let shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
 let separatedThinkingAutoTriggerRunning = false;
 let lastAssistantMessageRenderedAt = 0;
 
+// Pending-auto-trigger gate: a Promise that resolves when any pending
+// Separated Thinking auto-trigger has either run to completion, been skipped,
+// or been disabled. Guided actions (Response/Swipe/Continue) await this
+// before restoring the textarea so the textarea is empty while Separated
+// Thinking is using ST's prompt-manager path (which pulls {{input}} from the
+// textarea as the user's pending message). If no auto-trigger is pending,
+// the helper resolves immediately. A timeout caps the wait so a stuck
+// auto-trigger can't hang the guided action's finally block forever.
+let pendingAutoTriggerFinishPromise = null;
+let pendingAutoTriggerFinishResolver = null;
+
+function armPendingAutoTriggerGate() {
+    if (pendingAutoTriggerFinishPromise !== null) return;
+    pendingAutoTriggerFinishPromise = new Promise((resolve) => {
+        pendingAutoTriggerFinishResolver = resolve;
+    });
+}
+
+function resolvePendingAutoTriggerGate() {
+    if (pendingAutoTriggerFinishResolver) {
+        pendingAutoTriggerFinishResolver();
+    }
+    pendingAutoTriggerFinishPromise = null;
+    pendingAutoTriggerFinishResolver = null;
+}
+
+/**
+ * Resolves when any pending Separated Thinking auto-trigger has finished
+ * (or been skipped), or after `timeoutMs` (default 30s) — whichever comes
+ * first. Returns immediately if no auto-trigger is pending.
+ */
+export async function waitPendingAutoTriggers(timeoutMs = 30000) {
+    if (pendingAutoTriggerFinishPromise === null) return;
+    try {
+        await Promise.race([
+            pendingAutoTriggerFinishPromise,
+            new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+    } catch {
+        // Non-fatal — fall through and let the caller restore the textarea.
+    }
+}
+
 // Runs Separated Thinking while holding the auto-trigger guard so that the
 // swipe it generates does not arm (and then fire) the auto-trigger recursively.
 async function runSeparatedThinkingGuarded(options = {}) {
@@ -1795,6 +1838,12 @@ $(document).ready(async function () {
             !generateArgsObject?.signal &&
             !separatedThinkingAutoTriggerRunning;
         shouldAutoTriggerSeparatedThinkingAfterGeneration = shouldArmSeparatedThinkingAutoTrigger;
+        // Arm the gate so guided actions know to wait for Separated Thinking
+        // before restoring the textarea (the textarea must stay empty while
+        // ST's prompt manager resolves {{input}} for Separated Thinking).
+        if (shouldArmSeparatedThinkingAutoTrigger) {
+            armPendingAutoTriggerGate();
+        }
 
         // Condition for auto-triggering guides
         if ((type === 'normal' || typeof type === 'undefined') && !dryRun && !generateArgsObject?.signal) {
@@ -1913,6 +1962,7 @@ $(document).ready(async function () {
         const settings = extension_settings[extensionName];
         if (!settings?.autoTriggerSeparatedThinking) {
             shouldAutoTriggerSeparatedThinkingAfterGeneration = false;
+            resolvePendingAutoTriggerGate();
             return;
         }
 
@@ -1921,6 +1971,8 @@ $(document).ready(async function () {
                 shouldAutoTriggerSeparatedThinkingAfterGeneration,
                 separatedThinkingAutoTriggerRunning,
             });
+            // Not running this time — release any guided action waiting on the gate.
+            resolvePendingAutoTriggerGate();
             return;
         }
 
@@ -1954,6 +2006,9 @@ $(document).ready(async function () {
             console.error('[GuidedGenerations] Auto Separated Thinking failed:', error);
         } finally {
             separatedThinkingAutoTriggerRunning = false;
+            // Release any guided action waiting in its finally block on the
+            // gate before restoring the textarea.
+            resolvePendingAutoTriggerGate();
         }
     });
 

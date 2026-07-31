@@ -1,4 +1,4 @@
-import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, expandStMacros } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, expandStMacros, waitPendingAutoTriggers } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const extensionName = "GuidedGenerations-Extension";
 
@@ -97,6 +97,10 @@ const guidedContinue = async () => {
             indexOfMessageToModify = -1;
             textOfMessageBeforeContinue = '';
         } finally {
+            // Wait for any pending Separated Thinking auto-trigger to finish
+            // before restoring the textarea, so ST's prompt manager doesn't
+            // pick up the restored text as {{input}} for Separated Thinking.
+            await waitPendingAutoTriggers();
             const restoredInput = getPreviousImpersonateInput();
             textarea.value = restoredInput;
             textarea.dispatchEvent(new Event('input', { bubbles: true }));

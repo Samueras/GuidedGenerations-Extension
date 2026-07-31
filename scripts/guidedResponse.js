@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Guided Response button.
  */
-import { extension_settings, isGroupChat, setPreviousImpersonateInput, getPreviousImpersonateInput, debugLog, getPromptValue, expandStMacros, pickGroupMember } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, isGroupChat, setPreviousImpersonateInput, getPreviousImpersonateInput, debugLog, getPromptValue, expandStMacros, pickGroupMember, waitPendingAutoTriggers } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Import the guide scripts for direct execution
 import thinkingGuide from './persistentGuides/thinkingGuide.js'; // Correct relative path
@@ -72,6 +72,20 @@ const guidedResponse = async () => {
         } catch (error) {
             console.error(`[GuidedGenerations][Response] Error executing Guided Response stscript: ${error}`);
         } finally {
+            // Explicitly flush the guided-response injection BEFORE waiting on
+            // the auto-trigger gate. ST's `ephemeral=true` cleanup does not
+            // happen reliably before the GENERATION_ENDED handler fires, so the
+            // leftover `instruct` injection would otherwise leak into Separated
+            // Thinking's prompt-manager-built context.
+            try {
+                await context.executeSlashCommandsWithOptions('/flushinject instruct');
+            } catch (flushError) {
+                console.error('[GuidedGenerations][Response] Failed to flush instruct injection:', flushError);
+            }
+            // Wait for any pending Separated Thinking auto-trigger to finish
+            // before restoring the textarea, so ST's prompt manager doesn't
+            // pick up the restored text as {{input}} for Separated Thinking.
+            await waitPendingAutoTriggers();
             // Always restore the input field from the shared state
             const restoredInput = getPreviousImpersonateInput();
             textarea.value = restoredInput;
