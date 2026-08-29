@@ -67,12 +67,22 @@ function getGroupMembers() {
     const members = [];
     group.members.forEach((memberAvatar, index) => {
         if (typeof memberAvatar !== 'string') return;
-        const chid = characters.findIndex(c => c && c.avatar === memberAvatar);
-        if (chid === -1) return;
-        const character = characters[chid];
-        const name = typeof character.name === 'string' && character.name.length ? character.name : memberAvatar;
+        let chid = characters.findIndex(c => c && c.avatar === memberAvatar);
+        let character = chid !== -1 ? characters[chid] : null;
+
+        // Fallback: match by name or clean avatar filename if path formats differ
+        if (!character) {
+            const cleanName = memberAvatar.replace(/\.[^/.]+$/, "");
+            chid = characters.findIndex(c => c && (c.name === memberAvatar || c.name === cleanName || c.avatar?.includes(cleanName)));
+            character = chid !== -1 ? characters[chid] : null;
+        }
+
+        const name = (character && typeof character.name === 'string' && character.name.length)
+            ? character.name
+            : memberAvatar.replace(/\.[^/.]+$/, "");
+
         members.push({
-            chid,
+            chid: chid !== -1 ? chid : index,
             name,
             avatar: memberAvatar,
             muted: disabled.includes(memberAvatar),
@@ -83,7 +93,7 @@ function getGroupMembers() {
 }
 
 /**
- * GG's own picker popup. Builds a small centered dialog with one row per
+ * GG's own picker popup. Builds a small dialog above the bottom toolbar with one row per
  * group member (avatar + name) and resolves with the clicked member, or
  * null if the user dismisses the dialog without choosing.
  *
@@ -104,38 +114,143 @@ function ggFallbackPicker(members) {
             if (settled) return;
             settled = true;
             if (cleanup) cleanup();
-            dialog.remove();
+            container.remove();
             resolve(value);
         };
+
+        // Transparent overlay container that anchors the dialog above the bottom toolbar
+        // and captures outside clicks without darkening the screen.
+        const container = document.createElement('div');
+        container.className = 'gg-group-picker-container';
+        Object.assign(container.style, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            width: '100vw',
+            height: '100vh',
+            zIndex: '99999',
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'center',
+            paddingBottom: '60px',
+            boxSizing: 'border-box',
+            pointerEvents: 'auto',
+        });
+
+        container.addEventListener('click', (e) => {
+            if (e.target === container) {
+                finish(null);
+            }
+        });
 
         const dialog = document.createElement('div');
         dialog.className = 'gg-group-picker-dialog';
         dialog.setAttribute('role', 'dialog');
+        Object.assign(dialog.style, {
+            width: '320px',
+            maxWidth: '92vw',
+            maxHeight: '48vh',
+            backgroundColor: 'var(--SmartThemeBlurTintColor, #22262e)',
+            color: 'var(--SmartThemeBodyColor, #ffffff)',
+            border: '1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2))',
+            borderRadius: '10px',
+            padding: '12px',
+            boxShadow: '0 6px 24px rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            boxSizing: 'border-box',
+        });
 
         const header = document.createElement('div');
         header.className = 'gg-group-picker-header';
+        Object.assign(header.style, {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+            paddingBottom: '6px',
+        });
+
         const title = document.createElement('h3');
         title.textContent = 'Select member to respond as';
+        Object.assign(title.style, {
+            margin: '0',
+            fontSize: '0.95em',
+            fontWeight: '600',
+            color: 'inherit',
+        });
+
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'gg-group-picker-close';
         closeBtn.innerHTML = '&times;';
         closeBtn.setAttribute('aria-label', 'Cancel');
-        closeBtn.addEventListener('click', () => finish(null));
+        Object.assign(closeBtn.style, {
+            background: 'none',
+            border: 'none',
+            fontSize: '1.4em',
+            lineHeight: '1',
+            cursor: 'pointer',
+            color: 'inherit',
+            padding: '0 4px',
+            opacity: '0.8',
+        });
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            finish(null);
+        });
         header.append(title, closeBtn);
 
         const list = document.createElement('ul');
         list.className = 'gg-group-picker-list';
+        Object.assign(list.style, {
+            listStyle: 'none',
+            margin: '0',
+            padding: '0',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            maxHeight: '36vh',
+        });
 
         for (const member of members) {
             const li = document.createElement('li');
             li.className = 'gg-group-picker-item';
             li.tabIndex = 0;
             if (member.muted) li.classList.add('gg-group-picker-item--muted');
+            Object.assign(li.style, {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                transition: 'background-color 0.15s ease',
+                userSelect: 'none',
+                opacity: member.muted ? '0.5' : '1',
+            });
+
+            li.addEventListener('pointerenter', () => {
+                li.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+            });
+            li.addEventListener('pointerleave', () => {
+                li.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+            });
 
             const img = document.createElement('img');
             img.className = 'gg-group-picker-avatar';
             img.alt = '';
+            Object.assign(img.style, {
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                flexShrink: '0',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+            });
             if (member.avatar) {
                 img.src = `/thumbnail?type=avatar&file=${encodeURIComponent(member.avatar)}`;
             }
@@ -143,34 +258,47 @@ function ggFallbackPicker(members) {
 
             const name = document.createElement('span');
             name.className = 'gg-group-picker-name';
-            name.textContent = member.name;
+            name.textContent = member.name + (member.muted ? ' (muted)' : '');
+            Object.assign(name.style, {
+                fontSize: '0.95em',
+                fontWeight: '500',
+                color: 'inherit',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+            });
 
             li.append(img, name);
-            const choose = () => finish(member);
+
+            const choose = (e) => {
+                if (e) e.stopPropagation();
+                finish(member);
+            };
             li.addEventListener('click', choose);
             li.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    choose();
+                    choose(e);
                 }
             });
             list.appendChild(li);
         }
 
         dialog.append(header, list);
-        document.body.append(dialog);
+        container.append(dialog);
+        document.body.append(container);
 
-        // Close on outside click. Ignore clicks inside the dialog, and ignore
-        // the originating click that opened the picker (still propagating).
-        let suppressNextClick = true;
-        setTimeout(() => { suppressNextClick = false; }, 0);
-        const onDocumentClick = (e) => {
-            if (suppressNextClick) return;
-            if (!dialog.contains(/** @type {Node} */ (e.target))) {
-                finish(null);
+        // Adjust bottom padding dynamically so it floats right above the input bar
+        const updateOffset = () => {
+            const anchor = document.getElementById('gg-action-button-container') || document.getElementById('send_form');
+            if (anchor) {
+                const rect = anchor.getBoundingClientRect();
+                const offset = Math.max(10, window.innerHeight - rect.top + 8);
+                container.style.paddingBottom = `${offset}px`;
             }
         };
-        document.addEventListener('click', onDocumentClick);
+        updateOffset();
+        window.addEventListener('resize', updateOffset);
 
         /** @param {KeyboardEvent} e */
         const onKeydown = (e) => {
@@ -181,39 +309,10 @@ function ggFallbackPicker(members) {
         };
         document.addEventListener('keydown', onKeydown);
 
-        // Position the dialog like GG's tools menu: its bottom edge sits a
-        // few px above #gg-action-button-container (the GG button row), so it
-        // floats over the textarea instead of being glued to the screen
-        // bottom. Horizontally centered in the viewport. Falls back to
-        // #send_form's top, then to a small gap from the viewport bottom.
-        const updatePosition = () => {
-            const actionContainer = document.getElementById('gg-action-button-container');
-            const sendForm = document.getElementById('send_form');
-            const anchorEl = actionContainer || sendForm;
-            const gap = 5;
-            let bottomPx;
-            if (anchorEl) {
-                const anchorTop = anchorEl.getBoundingClientRect().top;
-                bottomPx = window.innerHeight - anchorTop + gap;
-            } else {
-                bottomPx = gap;
-            }
-            dialog.style.bottom = `${bottomPx}px`;
-            dialog.style.left = '50%';
-            dialog.style.transform = 'translateX(-50%)';
-        };
-        updatePosition();
-        window.addEventListener('resize', updatePosition);
-
         cleanup = () => {
-            document.removeEventListener('click', onDocumentClick);
             document.removeEventListener('keydown', onKeydown);
-            window.removeEventListener('resize', updatePosition);
+            window.removeEventListener('resize', updateOffset);
         };
-
-        // Re-measure once the dialog is laid out, in case fonts/images shift
-        // the anchor height on the same frame.
-        requestAnimationFrame(updatePosition);
 
         // Focus the first item so keyboard users can pick immediately.
         const firstItem = list.querySelector('.gg-group-picker-item');
